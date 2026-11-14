@@ -1,0 +1,14 @@
+# Node
+node_modules/
+*.tgz
+npm-debug.log*
+
+# 构建产物（tsdown 由 src/ 生成；克隆后 npm run build）
+lib/
+
+# IDE / 系统
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

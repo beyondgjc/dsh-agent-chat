@@ -1,0 +1,5 @@
+# dsh-agent-chat 自己的 patch 层：把插件行插入配置树。
+# 约束：id 必须全局唯一且与包名一致（DSH 插件管理器按它比对 entryIds）。
+- insert:
+    - id: dsh-agent-chat
+      name: 'dsh-agent-chat'
