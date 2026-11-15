@@ -22,6 +22,11 @@ const profile = join(
   'dsh-agent-chat',
 )
 
+/** --no-engine / DSH_DEPLOY_NO_ENGINE=1：不同步捆绑引擎（发布形态测试）——
+ *  否则捆绑副本（ensureEngine 第②层）永远遮蔽首启下载路径，且引擎版本徽标显示 vdev */
+const noEngine =
+  process.argv.includes('--no-engine') || process.env.DSH_DEPLOY_NO_ENGINE === '1'
+
 let ok = true
 
 /** 递归收集目录下全部文件的相对路径（/ 分隔） */
@@ -78,7 +83,22 @@ function syncTree(relDir) {
     console.log(`${relDir}/: 源不存在——跳过`)
     return
   }
-  const rels = walkRel(srcAbs)
+  let rels = walkRel(srcAbs)
+  if (noEngine && relDir === 'lib') {
+    rels = rels.filter((rel) => rel !== 'engine.js' && rel !== 'mock-agent.mjs')
+    // 发布形态：profile 里残留的捆绑副本也按孤儿清理（否则遮蔽首启下载路径）
+    for (const stale of ['engine.js', 'mock-agent.mjs']) {
+      const dst = join(dstAbs, stale)
+      if (existsSync(dst)) {
+        try {
+          unlinkSync(dst)
+          console.log(`lib/${stale}: 已移除（--no-engine 发布形态）`)
+        } catch {
+          /* 下次再清 */
+        }
+      }
+    }
+  }
   for (const rel of rels) compareAndRelink(join(relDir, rel), join(relDir, rel), `${relDir}/${rel}`)
   if (existsSync(dstAbs)) {
     const srcSet = new Set(rels)

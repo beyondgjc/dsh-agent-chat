@@ -10,7 +10,7 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { SuperApi } from './super-api.ts'
-import { downloadState, engineStatus, PLUGIN_VERSION, probeWorkbench } from './engine.ts'
+import { downloadState, engineStatus, PLUGIN_VERSION, portfileEngineVersion, probeWorkbench } from './engine.ts'
 import { nativePickDirectory } from './native-pick.ts'
 
 export const ROUTE_PREFIX = '/dsh-agent-chat-598'
@@ -65,7 +65,12 @@ export const SHELL_HTML = `<!doctype html>
     display: flex; flex-direction: column;
     background: var(--bg); color: var(--text); font-family: var(--font-ui);
   }
-  .tabs { display: flex; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  .tabs { display: flex; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--line); align-items: center; }
+  .ver-badge {
+    margin-left: auto; font-size: 11px; color: var(--text); opacity: 0.55;
+    font-family: var(--font-mono); white-space: nowrap;
+  }
+  .ver-badge.mismatch { opacity: 1; color: var(--warn); font-weight: 700; }
   .tabs button {
     font-size: 13px; padding: 4px 16px; border-radius: 6px;
     border: 1px solid var(--line); background: transparent;
@@ -116,6 +121,7 @@ export const SHELL_HTML = `<!doctype html>
 <div class="tabs">
   <button type="button" data-tab="groups" aria-pressed="true">群聊</button>
   <button type="button" data-tab="disc" aria-pressed="false">讨论</button>
+  <span id="ver-badge" class="ver-badge" title="插件版本 · 存活引擎版本（引擎版本落后于插件 = 修复未生效）"></span>
 </div>
 <div class="frames">
   <iframe data-page="groups" title="Super 群聊"></iframe>
@@ -152,53 +158,84 @@ export const SHELL_HTML = `<!doctype html>
     }
   });
   apply(tab === 'disc' ? 'disc' : 'groups');
-  /* 引擎初始化引导：轮询 /setup/status——引导层覆盖全页显示进度；引擎就绪后
-     退场，并把「引擎缺席期间打开」的内层页重载（否则停留在 fetch failed） */
+  /* 版本徽标：插件期望版本 vs 存活引擎版本——不匹配 = 修复未生效（琥珀警示） */
+  function updateVerBadge(j) {
+    var el = document.getElementById('ver-badge');
+    if (!el) return;
+    var pv = j && j.pluginVersion, ev = j && j.engineVersion;
+    el.textContent = '插件 v' + (pv || '?') + ' · 引擎 ' + (ev ? 'v' + ev : '未运行');
+    el.className = 'ver-badge' + (pv && ev && pv !== ev ? ' mismatch' : '');
+  }
+  /* 引导层渲染（boot 轮询与常驻监视共用）：引擎死 → 重现引导卡；恢复 → 重载内页 */
+  var shellSawDown = false;
+  function renderSetup(j) {
+    updateVerBadge(j);
+    var overlay = document.getElementById('setup');
+    if (!overlay) return;
+    if (j && j.live) {
+      if (shellSawDown) {
+        overlay.hidden = true;
+        // 引擎是后起来的：内层页打开时 /wb 还不通，重载拿到真界面
+        frames[0].src = frames[0].src;
+        frames[1].src = frames[1].src;
+        shellSawDown = false;
+      }
+      return;
+    }
+    shellSawDown = true;
+    overlay.hidden = false;
+    var bar = document.getElementById('setup-bar');
+    var status = document.getElementById('setup-status');
+    var err = document.getElementById('setup-err');
+    var d = (j && j.download) || {};
+    err.hidden = true;
+    bar.classList.remove('indet');
+    if (d.phase === 'downloading') {
+      var pct = d.total ? Math.round((d.received / d.total) * 100) : 0;
+      bar.style.width = (d.total ? pct : 38) + '%';
+      if (!d.total) bar.classList.add('indet');
+      status.textContent = '正在下载引擎 ' + pct + '%（' +
+        (d.received / 1048576).toFixed(2) + ' / ' + (d.total ? (d.total / 1048576).toFixed(2) : '?') + ' MB）';
+    } else if (d.phase === 'verifying') {
+      bar.style.width = '100%';
+      status.textContent = '下载完成，正在校验完整性…';
+    } else if (d.phase === 'done') {
+      bar.style.width = '100%';
+      status.textContent = '引擎就绪，正在启动…';
+    } else if (j && j.engine && j.engine.lastError) {
+      bar.classList.add('indet');
+      status.textContent = '引擎未能自动启动';
+      err.textContent = j.engine.lastError + '——可尝试安装桌面版（含引擎）后重开面板，或在已装 Super Agent CLI 的机器上先启动 workbench 再重开本面板。';
+      err.hidden = false;
+    } else {
+      bar.classList.add('indet');
+      status.textContent = '正在启动本地引擎…';
+    }
+  }
+  /* 常驻监视（5s）：boot 轮询结束后接管——引擎中途死亡时引导层重现（不再裸奔
+     fetch failed），恢复后自动重载内页；版本徽标同步刷新 */
+  var bootPollDone = false;
+  setInterval(function () {
+    fetch(base + '/setup/status').then(function (r) { return r.json(); }).then(function (j) {
+      if (bootPollDone) renderSetup(j);
+      else updateVerBadge(j);
+    }).catch(function () {
+      shellSawDown = true;
+      if (bootPollDone) renderSetup(null);
+      updateVerBadge(null);
+      var el = document.getElementById('ver-badge');
+      if (el) el.textContent = '插件 v? · 引擎未运行';
+    });
+  }, 5000);
+  /* boot 轮询（800ms × 600）：首屏快速跟进下载进度；结束（就绪/超时/失败）后交棒监视器 */
   (function pollSetup(tries) {
     fetch(base + '/setup/status').then(function (r) { return r.json(); }).then(function (j) {
-      var overlay = document.getElementById('setup');
-      if (!overlay) return;
-      if (j.live) {
-        overlay.hidden = true;
-        if (pollSetup.sawDown) {
-          // 引擎是后起来的：内层页打开时 /wb 还不通，重载拿到真界面
-          frames[0].src = frames[0].src;
-          frames[1].src = frames[1].src;
-        }
-        return;
-      }
-      pollSetup.sawDown = true;
-      overlay.hidden = false;
-      var bar = document.getElementById('setup-bar');
-      var status = document.getElementById('setup-status');
-      var err = document.getElementById('setup-err');
-      var d = j.download || {};
-      err.hidden = true;
-      bar.classList.remove('indet');
-      if (d.phase === 'downloading') {
-        var pct = d.total ? Math.round((d.received / d.total) * 100) : 0;
-        bar.style.width = (d.total ? pct : 38) + '%';
-        if (!d.total) bar.classList.add('indet');
-        status.textContent = '正在下载引擎 ' + pct + '%（' +
-          (d.received / 1048576).toFixed(2) + ' / ' + (d.total ? (d.total / 1048576).toFixed(2) : '?') + ' MB）';
-      } else if (d.phase === 'verifying') {
-        bar.style.width = '100%';
-        status.textContent = '下载完成，正在校验完整性…';
-      } else if (d.phase === 'done') {
-        bar.style.width = '100%';
-        status.textContent = '引擎就绪，正在启动…';
-      } else if (j.engine && j.engine.lastError) {
-        bar.classList.add('indet');
-        status.textContent = '引擎未能自动启动';
-        err.textContent = j.engine.lastError + '——可尝试安装桌面版（含引擎）后重开面板，或在已装 Super Agent CLI 的机器上先启动 workbench 再重开本面板。';
-        err.hidden = false;
-      } else {
-        bar.classList.add('indet');
-        status.textContent = '正在启动本地引擎…';
-      }
-      if (tries < 600) setTimeout(function () { pollSetup(tries + 1); }, 800);
+      renderSetup(j);
+      if (j.live || tries >= 600) { bootPollDone = true; return; }
+      setTimeout(function () { pollSetup(tries + 1); }, 800);
     }).catch(function () {
-      if (tries < 600) setTimeout(function () { pollSetup(tries + 1); }, 800);
+      if (tries >= 600) { bootPollDone = true; return; }
+      setTimeout(function () { pollSetup(tries + 1); }, 800);
     });
   })(0);
 })();
@@ -234,6 +271,9 @@ export function createSuperRouteHandler(api: SuperApi) {
           live: await probeWorkbench(base),
           engine: engineStatus(),
           download: downloadState,
+          // 版本可见化：插件期望版本 vs 存活引擎版本——"修复没生效"这类困惑一眼看穿
+          pluginVersion: PLUGIN_VERSION,
+          engineVersion: portfileEngineVersion(),
         })
         return
       }
@@ -268,9 +308,10 @@ export function createSuperRouteHandler(api: SuperApi) {
             `headers:{'content-type':'application/json'},body:JSON.stringify({theme:cur()})})}catch(e){}}` +
             `function sync(){try{fetch(window.__SUPER_PROXY__+'/api/theme')` +
             `.then(function(r){return r.json()}).then(function(j){` +
-            `if(j.theme==='paper'||j.theme==='signal')apply(j.theme)}).catch(function(){})}catch(e){}}` +
+            `if(j.theme==='paper'||j.theme==='signal')apply(j.theme);else post();` +
+            `}).catch(function(){})}catch(e){}}` +
             `new MutationObserver(post).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});` +
-            `document.addEventListener('DOMContentLoaded',function(){post();sync();});` +
+            `document.addEventListener('DOMContentLoaded',function(){sync();});` +
             `setInterval(sync,1200);})();</script>`
           html = /<head[^>]*>/i.test(html)
             ? html.replace(/<head[^>]*>/i, (m) => m + shim)
