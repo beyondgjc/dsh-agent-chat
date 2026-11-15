@@ -14,7 +14,7 @@
  */
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -250,6 +250,9 @@ export async function downloadEngineArtifact(
   if (manifest.sha256 && got !== manifest.sha256) throw new Error('引擎 artifact SHA256 不匹配')
   const AdmZip = (await import('adm-zip')).default
   new AdmZip(zipBuf).extractAllTo(cache, true)
+  // manifest 落盘进缓存：cacheValid 以它判完整性；engine-entry 以它自报版本
+  // （zip 内不含 manifest——历史上只用于校验后即弃，缓存层与版本接管全部失灵）
+  writeFileSync(join(cache, 'engine-manifest.json'), JSON.stringify(manifest), 'utf8')
   downloadState.phase = 'done'
 }
 
@@ -262,14 +265,35 @@ function cacheValid(cache: string): boolean {
   )
 }
 
+/** 引擎进程存活实例的版本（portfile.version；v0.2.7 前的旧引擎无此字段 → null） */
+export function portfileEngineVersion(): string | null {
+  try {
+    const dataDir =
+      process.env.SUPER_AGENT_DATA_DIR?.trim() || join(homedir(), 'Documents', 'SuperAgent')
+    const j = JSON.parse(readFileSync(join(dataDir, 'workbench.port'), 'utf8')) as {
+      version?: string
+    }
+    return typeof j.version === 'string' && j.version ? j.version : null
+  } catch {
+    return null
+  }
+}
+
 /**
  * 确保有可用实例：探测存活 → 捆绑副本 → 下载缓存 → 首启下载 → 放弃。
+ * 探测复用带版本比对：存活实例版本 ≠ 插件期望版本时不复用（否则引擎升级会被
+ * 长期存活的旧实例钉死——v0.2.7 用户实测旧引擎存活 30 分钟，四个版本修复全部
+ * 未加载）。新引擎拉起时 engine-entry 的版本守卫会接管旧实例。
  * 返回最终是否探测到存活实例；失败信息在 engineStatus().lastError / downloadState。
  */
 export async function ensureEngine(
   resolveBase: () => Promise<string>,
 ): Promise<{ live: boolean; spawned: boolean }> {
-  if (await probeWorkbench(await resolveBase())) return { live: true, spawned: false }
+  if (await probeWorkbench(await resolveBase())) {
+    const liveVer = portfileEngineVersion()
+    if (!liveVer || liveVer === PLUGIN_VERSION) return { live: true, spawned: false }
+    lastError = `存活引擎 v${liveVer} ≠ 插件期望 v${PLUGIN_VERSION}——将由新版本接管`
+  }
 
   // 1) 捆绑副本（dev / 本地 deploy 形态）
   const bundled = engineBundlePath()
