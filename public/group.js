@@ -497,6 +497,8 @@ async function loadAgentKinds() {
       (d.agents ?? []).map((a) => ({
         kind: a.kind,
         label: `${a.kind}（${a.version}）`,
+        pkg: a.pkg ?? "",
+        version: a.version ?? "",
         installed: !!a.installed,
         login: !!a.login,
         loginNote: a.loginNote ?? null,
@@ -508,20 +510,26 @@ async function loadAgentKinds() {
   renderAgentSelect();
 }
 
+/* 应用下拉选项（含未安装分组）；建群表单与拉人下拉共用 */
+function agentOptionsHtml(selected) {
+  const installed = state.agents.filter((a) => a.installed);
+  const missing = state.agents.filter((a) => !a.installed);
+  const opt = (a) => `<option value="${esc(a.kind)}" ${a.kind === selected ? "selected" : ""}>${esc(a.label)}</option>`;
+  return (
+    installed.map(opt).join("") +
+    (missing.length
+      ? `<optgroup label="未安装（选中后可一键安装）">${missing.map(opt).join("")}</optgroup>`
+      : "")
+  );
+}
+
 /* 应用下拉：已安装 / 未安装（置灰分组，选中后可一键安装） */
 function renderAgentSelect() {
   const sel = $("#am-app");
   if (!sel) return;
   sel.onchange = () => renderAgentHint();
   const installed = state.agents.filter((a) => a.installed);
-  const missing = state.agents.filter((a) => !a.installed);
-  sel.innerHTML =
-    installed.map((a) => `<option value="${esc(a.kind)}">${esc(a.label)}</option>`).join("") +
-    (missing.length
-      ? `<optgroup label="未安装（选中后可一键安装）">${missing
-          .map((a) => `<option value="${esc(a.kind)}">${esc(a.label)}（未安装）</option>`)
-          .join("")}</optgroup>`
-      : "");
+  sel.innerHTML = agentOptionsHtml(sel.value);
   if (!state.agents.some((a) => a.kind === sel.value && a.installed)) {
     sel.value = installed[0]?.kind ?? "mock";
   }
@@ -536,42 +544,50 @@ function renderAgentHint() {
   if (cur.installed) {
     // 已安装：给出登录向导入口（不探测登录态——失败信号驱动）
     hint.hidden = !cur.login;
+    hint.classList.toggle("info", !!cur.login);
     if (cur.login) {
-      hint.innerHTML = `<span class="muted small">首次使用 ${esc(cur.kind)} 需登录（${esc(cur.loginNote ?? "")}）。</span> <button type="button" id="am-login" class="ghost">打开登录窗口</button>`;
-      document.getElementById("am-login")?.addEventListener("click", async () => {
+      hint.innerHTML =
+        `<div class="ih-head">${INFO_SVG}<span>首次使用 ${esc(cur.kind)} 需登录</span></div>` +
+        `<div class="ih-detail">${esc(cur.loginNote ?? "")}</div>` +
+        `<div class="ih-actions"><button type="button" class="ghost" data-login-kind="${esc(cur.kind)}">打开登录窗口</button></div>`;
+      hint.querySelector("[data-login-kind]")?.addEventListener("click", async () => {
         try { await post(`/api/agents/${cur.kind}/login`); showBanner("已打开登录终端窗口——完成登录后关闭窗口并重试。", "ok"); }
         catch (e) { showBanner(`打开登录窗口失败：${e.message}`); }
       });
     }
     return;
   }
+  hint.classList.remove("info");
   hint.hidden = false;
-  hint.innerHTML = `<span class="muted small">${esc(cur.kind)} 未安装——将精确安装 ${esc(cur.pkg)}@${esc(cur.version)}（需本机 Node.js/npm）。</span> <button type="button" id="am-install" class="ghost">一键安装</button> <span id="am-install-out" class="muted small"></span>`;
-  document.getElementById("am-install")?.addEventListener("click", async () => {
-    const btn = document.getElementById("am-install");
-    if (btn) { btn.disabled = true; btn.textContent = "安装中…"; }
+  hint.innerHTML = installCardHtml(cur, amInstallUi[cur.kind]);
+  hint.querySelector("[data-install-kind]")?.addEventListener("click", async () => {
+    amInstallUi[cur.kind] = { running: true };
+    renderAgentHint();
     try { await post(`/api/agents/${cur.kind}/install`); } catch (e) {
       showBanner(`安装启动失败：${e.message}`);
+      amInstallUi[cur.kind] = { running: false };
       renderAgentHint();
       return;
     }
-    await pollAgentInstall(cur);
+    const timer = setInterval(async () => {
+      try {
+        const st = await api(`/api/agents/${cur.kind}/install/status`);
+        amInstallUi[cur.kind] = { running: st.running, code: st.code };
+        if (!st.running) {
+          clearInterval(timer);
+          if (st.installed) showBanner(`${cur.kind} 安装完成。`, "ok");
+          await loadAgentKinds();
+          const sel = document.getElementById("am-app");
+          if (sel && state.agents.some((a) => a.kind === cur.kind)) sel.value = cur.kind;
+        }
+        renderAgentHint();
+      } catch { clearInterval(timer); }
+    }, 1200);
   });
-}
-
-async function pollAgentInstall(cur) {
-  for (;;) {
-    let st;
-    try { st = await api(`/api/agents/${cur.kind}/install/status`); } catch { return; }
-    const out = document.getElementById("am-install-out");
-    if (out) out.textContent = st.running ? "下载安装中…" : st.code === 0 ? "安装完成 ✓" : st.code == null ? "…" : `失败（退出码 ${st.code}），详情见上`;
-    if (!st.running) break;
-    await new Promise((r) => setTimeout(r, 1200));
-  }
-  await loadAgentKinds();
-  const sel = document.getElementById("am-app");
-  if (sel && state.agents.some((a) => a.kind === cur.kind)) sel.value = cur.kind;
-  renderAgentHint();
+  hint.querySelector("[data-login-kind]")?.addEventListener("click", async () => {
+    try { const r = await post(`/api/agents/${cur.kind}/login`); showBanner("已打开登录终端窗口——完成登录后关闭窗口并重试。", "ok"); }
+    catch (e) { showBanner(`打开登录窗口失败：${e.message}`); }
+  });
 }
 
 async function addMember() {
@@ -593,6 +609,91 @@ async function addMember() {
 
 /* ---------------- 新建群 ---------------- */
 
+/* 安装/登录引导卡（建群表单与拉人下拉共用）：结构化呈现，告别裸文本 */
+const WARN_SVG =
+  '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">' +
+  '<path d="M8 2.2 14.6 13.4H1.4Z" stroke-linejoin="round"/><path d="M8 6.4v3.2"/>' +
+  '<circle cx="8" cy="11.7" r=".7" fill="currentColor" stroke="none"/></svg>';
+const INFO_SVG =
+  '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">' +
+  '<circle cx="8" cy="8" r="6.2"/><path d="M8 7.4v3.4"/><circle cx="8" cy="5.2" r=".7" fill="currentColor" stroke="none"/></svg>';
+
+function installStatusHtml(st) {
+  return st?.running
+    ? '<span class="ih-status">安装中…</span>'
+    : st?.code === 0
+      ? '<span class="ih-status">安装完成 ✓</span>'
+      : st?.code != null && st.code !== 0
+        ? `<span class="ih-status">失败（退出码 ${st.code}）</span>`
+        : "";
+}
+
+function installCardHtml(a, st) {
+  const loginBtn =
+    a.login && st?.code === 0
+      ? `<button type="button" class="ghost" data-login-kind="${esc(a.kind)}">打开登录窗口</button>`
+      : "";
+  return (
+    `<div class="ih-head">${WARN_SVG}<span>${esc(a.kind)} 未安装</span>${installStatusHtml(st)}</div>` +
+    `<div class="ih-detail">将精确安装 <code>${esc(a.pkg)}@${esc(a.version)}</code>（需本机 Node.js/npm）</div>` +
+    `<div class="ih-actions"><button type="button" class="ghost" data-install-kind="${esc(a.kind)}"${st?.running ? " disabled" : ""}>${st?.running ? "安装中…" : "一键安装"}</button>${loginBtn}</div>`
+  );
+}
+
+/* 建群表单的成员应用选中了未安装项时：精确版本一键安装 + 登录窗口（冷启动引导） */
+const gfInstallUi = {};
+/* 拉人下拉的安装状态（同结构） */
+const amInstallUi = {};
+
+function syncGfInstallHint() {
+  const host = $("#gf-install-hint");
+  if (!host) return;
+  const missing = [...new Set(state.newForm.members.map((m) => m.appId))].filter((k) => {
+    const a = state.agents.find((x) => x.kind === k);
+    return a && a.installed === false;
+  });
+  if (missing.length === 0) { host.hidden = true; host.innerHTML = ""; return; }
+  host.hidden = false;
+  host.innerHTML = missing
+    .map((k) => installCardHtml(state.agents.find((x) => x.kind === k), gfInstallUi[k]))
+    .join("");
+  for (const b of host.querySelectorAll("[data-install-kind]")) {
+    b.addEventListener("click", async () => {
+      const k = b.dataset.installKind;
+      gfInstallUi[k] = { running: true };
+      syncGfInstallHint();
+      try { await post(`/api/agents/${k}/install`); } catch (e) {
+        showBanner(`安装启动失败：${e.message}`);
+        gfInstallUi[k] = { running: false };
+        syncGfInstallHint();
+        return;
+      }
+      const timer = setInterval(async () => {
+        try {
+          const st = await api(`/api/agents/${k}/install/status`);
+          gfInstallUi[k] = { running: st.running, code: st.code };
+          if (!st.running) {
+            clearInterval(timer);
+            if (st.installed) showBanner(`${k} 安装完成。`, "ok");
+            await loadAgentKinds(); // 刷新两处下拉的安装状态
+            renderNewFormMembers();
+          } else {
+            syncGfInstallHint();
+          }
+        } catch { clearInterval(timer); }
+      }, 1200);
+    });
+  }
+  for (const b of host.querySelectorAll("[data-login-kind]")) {
+    b.addEventListener("click", async () => {
+      try {
+        const r = await post(`/api/agents/${b.dataset.loginKind}/login`);
+        showBanner(`已打开登录终端窗口。${r.note ?? ""}`);
+      } catch (e) { showBanner(`打开登录窗口失败：${e.message}`); }
+    });
+  }
+}
+
 function renderNewFormMembers() {
   const el = $("#gf-members");
   el.innerHTML = state.newForm.members
@@ -601,7 +702,7 @@ function renderNewFormMembers() {
     <div class="participant-row">
       <span class="participant-index">成员 ${i + 1}</span>
       <select data-idx="${i}" data-field="appId">
-        ${state.agents.map((a) => `<option value="${esc(a.kind)}" ${a.kind === m.appId ? "selected" : ""}>${esc(a.label)}</option>`).join("")}
+        ${agentOptionsHtml(m.appId)}
       </select>
       <input data-idx="${i}" data-field="label" type="text" class="member-label" placeholder="显示名（可空）" value="${esc(m.label ?? "")}" />
       <input data-idx="${i}" data-field="env" type="text" class="member-env" placeholder='env JSON（可空）' value="${esc(m.envRaw ?? "")}" />
@@ -610,7 +711,10 @@ function renderNewFormMembers() {
     )
     .join("");
   for (const sel of el.querySelectorAll("select[data-field]")) {
-    sel.addEventListener("change", () => { state.newForm.members[Number(sel.dataset.idx)].appId = sel.value; });
+    sel.addEventListener("change", () => {
+      state.newForm.members[Number(sel.dataset.idx)].appId = sel.value;
+      syncGfInstallHint();
+    });
   }
   for (const inp of el.querySelectorAll("input[data-field]")) {
     inp.addEventListener("input", () => {
@@ -623,6 +727,7 @@ function renderNewFormMembers() {
       renderNewFormMembers();
     });
   }
+  syncGfInstallHint();
 }
 
 function showNewForm() {
@@ -757,3 +862,22 @@ main().catch((err) => {
   showBanner(`初始化失败：${err.message}（10 秒后自动重试）`);
   setTimeout(() => location.reload(), 10_000);
 });
+
+/* 面板切换胶囊：嵌入 DSH 面板（shell 容器）时 postMessage 驱动 tab 切换；
+   独立运行（桌面版/CLI）时照常页面导航 */
+(function () {
+  var here = document.body.classList.contains("disc") ? "disc" : "groups";
+  document.querySelectorAll(".page-switch button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var target = b.dataset.page;
+      if (target === here) return;
+      if (window.parent !== window) {
+        try {
+          window.parent.postMessage({ type: "agent-chat-tab", tab: target }, location.origin);
+          return;
+        } catch (e) { /* 回退导航 */ }
+      }
+      location.href = target === "groups" ? "/groups" : "/";
+    });
+  });
+})();

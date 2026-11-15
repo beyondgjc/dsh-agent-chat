@@ -1742,3 +1742,40 @@ function bootOnce() {
 }
 bootOnce();
 loadAgentOptions();
+
+/* 讨论列表侧栏折叠（ChatGPT 式开关，与群聊页同款；共用 wbAsideFold 状态语义） */
+(function () {
+  let folded = "0";
+  try { folded = sessionStorage.getItem("wbAsideFold") ?? "0"; } catch {}
+  const b = document.getElementById("btn-aside");
+  if (!b) return;
+  const apply = () => {
+    document.body.classList.toggle("aside-folded", folded === "1");
+    b.setAttribute("aria-expanded", folded === "1" ? "false" : "true");
+  };
+  apply();
+  b.addEventListener("click", () => {
+    folded = folded === "1" ? "0" : "1";
+    try { sessionStorage.setItem("wbAsideFold", folded); } catch {}
+    apply();
+  });
+})();
+
+/* 面板切换胶囊：嵌入 DSH 面板（shell 容器）时 postMessage 驱动 tab 切换；
+   独立运行（桌面版/CLI）时照常页面导航 */
+(function () {
+  var here = document.body.classList.contains("disc") ? "disc" : "groups";
+  document.querySelectorAll(".page-switch button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var target = b.dataset.page;
+      if (target === here) return;
+      if (window.parent !== window) {
+        try {
+          window.parent.postMessage({ type: "agent-chat-tab", tab: target }, location.origin);
+          return;
+        } catch (e) { /* 回退导航 */ }
+      }
+      location.href = target === "groups" ? "/groups" : "/";
+    });
+  });
+})();

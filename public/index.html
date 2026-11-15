@@ -17,8 +17,14 @@
     })();
   </script>
 </head>
-<body>
+<body class="disc">
   <header>
+    <button type="button" id="btn-aside" class="ghost layout-toggle icon-toggle" aria-expanded="true" title="折叠/展开讨论列表" aria-label="折叠/展开讨论列表">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+        <rect x="1.8" y="2.8" width="12.4" height="10.4" rx="2"/>
+        <path d="M6.2 2.8v10.4"/>
+      </svg>
+    </button>
     <span class="brand-mark" aria-hidden="true">
       <span class="brand-char">议</span>
       <svg class="brand-orbit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
@@ -29,7 +35,10 @@
     </span>
     <h1>Super Agent 工作台</h1>
     <span class="muted">仅本机回环 · 来源校验 · 首期单场讨论</span>
-    <a class="nav-link" href="/groups">群聊室 →</a>
+    <div class="page-switch" role="group" aria-label="面板切换">
+      <button type="button" data-page="disc" aria-pressed="true">讨论</button>
+      <button type="button" data-page="groups" aria-pressed="false">群聊</button>
+    </div>
     <div class="theme-switch" role="group" aria-label="界面主题">
       <button type="button" id="theme-paper" aria-pressed="true">素纸</button>
       <button type="button" id="theme-signal" aria-pressed="false">信号台</button>
