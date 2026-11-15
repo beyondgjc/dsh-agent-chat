@@ -214,7 +214,24 @@ interface ArtifactManifest {
   size: number
 }
 
-/** 下载/校验引擎 artifact（单 zip + SHA256）并解压到缓存目录，进度上报到 downloadState */
+/** 带超时的 fetch（CN→GitHub 长悬挂实测：无超时 = 引导层永远 0%） */
+async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Response> {
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    return await fetch(url, { signal: ctrl.signal })
+  } finally {
+    clearTimeout(t)
+  }
+}
+
+const DL_ATTEMPTS = 3
+const MANIFEST_TIMEOUT_MS = Number(process.env.DSH_DL_TIMEOUT_MS ?? 10_000)
+const ZIP_IDLE_TIMEOUT_MS = Number(process.env.DSH_DL_IDLE_TIMEOUT_MS ?? 20_000)
+
+/** 下载/校验引擎 artifact（单 zip + SHA256）并解压到缓存目录，进度上报到 downloadState。
+ *  清单与 zip 各 3 次尝试、超时快速失败（manifest 10s / zip 流 20s 无进展即断），
+ *  拒绝无限悬挂。 */
 export async function downloadEngineArtifact(
   baseUrl = `https://github.com/${REPO_SLUG}/releases/download/v${PLUGIN_VERSION}`,
 ): Promise<void> {
@@ -225,25 +242,65 @@ export async function downloadEngineArtifact(
   downloadState.received = 0
   downloadState.total = 0
 
-  const mResp = await fetch(`${baseUrl}/engine-manifest.json`)
-  if (!mResp.ok) throw new Error(`清单获取失败：HTTP ${mResp.status}`)
-  const manifest = (await mResp.json()) as ArtifactManifest
+  // 1) 清单（3 次尝试）
+  let manifest: ArtifactManifest | null = null
+  let lastErr: unknown = null
+  for (let attempt = 1; attempt <= DL_ATTEMPTS && !manifest; attempt++) {
+    try {
+      const mResp = await fetchWithTimeout(`${baseUrl}/engine-manifest.json`, MANIFEST_TIMEOUT_MS)
+      if (!mResp.ok) throw new Error(`清单获取失败：HTTP ${mResp.status}`)
+      manifest = (await mResp.json()) as ArtifactManifest
+    } catch (err) {
+      lastErr = err
+      if (attempt < DL_ATTEMPTS) await sleep(1500 * attempt)
+    }
+  }
+  if (!manifest) {
+    throw new Error(
+      `${String((lastErr as Error)?.message ?? lastErr)}（重试 ${DL_ATTEMPTS} 次未成功）`,
+    )
+  }
   downloadState.total = manifest.size || 0
   downloadState.file = 'engine-artifact.zip'
 
-  const resp = await fetch(`${baseUrl}/engine-artifact.zip`)
-  if (!resp.ok) throw new Error(`引擎下载失败：HTTP ${resp.status}`)
-  const chunks: Buffer[] = []
-  const reader = resp.body?.getReader()
-  if (reader) {
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      chunks.push(Buffer.from(value))
-      downloadState.received += value.length
+  // 2) zip（3 次尝试；读流 20s 无进展即断重试）
+  let zipBuf: Buffer | null = null
+  for (let attempt = 1; attempt <= DL_ATTEMPTS && !zipBuf; attempt++) {
+    const ctrl = new AbortController()
+    let idleTimer: NodeJS.Timeout | undefined
+    const armIdle = () => {
+      clearTimeout(idleTimer)
+      idleTimer = setTimeout(() => ctrl.abort(), ZIP_IDLE_TIMEOUT_MS)
+    }
+    try {
+      const resp = await fetch(`${baseUrl}/engine-artifact.zip`, { signal: ctrl.signal })
+      if (!resp.ok) throw new Error(`引擎下载失败：HTTP ${resp.status}`)
+      const chunks: Buffer[] = []
+      const reader = resp.body?.getReader()
+      if (reader) {
+        armIdle()
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          armIdle()
+          chunks.push(Buffer.from(value))
+          downloadState.received += value.length
+        }
+      }
+      zipBuf = Buffer.concat(chunks)
+    } catch (err) {
+      lastErr = err
+      downloadState.received = 0
+      if (attempt < DL_ATTEMPTS) await sleep(1500 * attempt)
+    } finally {
+      clearTimeout(idleTimer)
     }
   }
-  const zipBuf = Buffer.concat(chunks)
+  if (!zipBuf) {
+    throw new Error(
+      `${String((lastErr as Error)?.message ?? lastErr)}（重试 ${DL_ATTEMPTS} 次未成功——网络可达 GitHub Releases 时将自动重试）`,
+    )
+  }
 
   downloadState.phase = 'verifying'
   const got = createHash('sha256').update(zipBuf).digest('hex')
@@ -281,9 +338,9 @@ export function portfileEngineVersion(): string | null {
 
 /**
  * 确保有可用实例：探测存活 → 捆绑副本 → 下载缓存 → 首启下载 → 放弃。
- * 探测复用带版本比对：存活实例版本 ≠ 插件期望版本时不复用（否则引擎升级会被
- * 长期存活的旧实例钉死——v0.2.7 用户实测旧引擎存活 30 分钟，四个版本修复全部
- * 未加载）。新引擎拉起时 engine-entry 的版本守卫会接管旧实例。
+ * 探测复用带版本比对：存活实例版本 ≠ 插件期望版本时——**旧引擎继续服役**（面板
+ * 不中断），新引擎在后台下载，下次 DSH 启动由 engine-entry 的版本守卫接管。
+ * （v0.2.19 教训：升级期不保留旧引擎服役 = 网络一抖面板全砖。）
  * 返回最终是否探测到存活实例；失败信息在 engineStatus().lastError / downloadState。
  */
 export async function ensureEngine(
@@ -292,7 +349,12 @@ export async function ensureEngine(
   if (await probeWorkbench(await resolveBase())) {
     const liveVer = portfileEngineVersion()
     if (!liveVer || liveVer === PLUGIN_VERSION) return { live: true, spawned: false }
-    lastError = `存活引擎 v${liveVer} ≠ 插件期望 v${PLUGIN_VERSION}——将由新版本接管`
+    // 版本不匹配：旧引擎继续服役，新引擎后台下载（缓存就绪后下次启动接管）
+    lastError = `存活引擎 v${liveVer}，插件期望 v${PLUGIN_VERSION}——新引擎后台下载中，下次启动接管`
+    if (!cacheValid(artifactCacheDir())) {
+      void downloadEngineArtifact().catch(() => {})
+    }
+    return { live: true, spawned: false }
   }
 
   // 1) 捆绑副本（dev / 本地 deploy 形态）

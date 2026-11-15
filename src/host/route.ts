@@ -180,7 +180,9 @@ export const SHELL_HTML = `<!doctype html>
     el.style.display = 'block';
     el.className = 'ver-badge' + (mismatch ? ' mismatch' : '');
     el.textContent = (mismatch ? '版本不匹配 · ' : '') + (down ? '引擎未运行 · ' : '') +
-      '插件 v' + (pv || '?') + ' 引擎 v' + (ev || '?');
+      '插件 v' + (pv || '?') + ' 引擎 v' + (ev || '?') +
+      (j && j.download && j.download.phase === 'downloading' ? ' · 新引擎下载中 ' +
+        Math.round(((j.download.received || 0) / (j.download.total || 1)) * 100) + '%' : '');
   }
   /* 引导层渲染（boot 轮询与常驻监视共用）：引擎死 → 重现引导卡；恢复 → 重载内页 */
   var shellSawDown = false;
