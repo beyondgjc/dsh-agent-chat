@@ -52,20 +52,45 @@ export const SHELL_HTML = `<!doctype html>
   }
   html[data-theme="paper"] body { background: var(--bg); color: var(--text); }
   html[data-theme="signal"] body { background: var(--bg); color: var(--text); }
-  .tabs {
-    display: flex; gap: 10px; padding: 8px 10px; align-items: center;
-    border-bottom: 1px solid var(--line, rgba(255, 255, 255, 0.09));
-  }
-  /* tab 胶囊复用 workbench 的 .theme-switch 组件样式（同源已加载其 style.css）——
-     与内容页控件同一设计语言，主题令牌同步生效，不再自定义外观搞特殊 */
-  .tabs.theme-switch { margin-left: 0; }
-  .ver-badge {
-    margin-left: auto; font-size: 11px; color: var(--muted, rgba(214, 217, 221, 0.55));
-    font-family: Consolas, "Cascadia Mono", monospace; white-space: nowrap;
-  }
-  .ver-badge.mismatch { color: #ffb547; opacity: 1; font-weight: 700; }
   .frames { flex: 1; display: flex; min-height: 0; }
   .frames iframe { flex: 1; width: 100%; border: none; display: none; background: #10151b; }
+  /* 引擎初始化引导层：自成一体深色（不依赖 workbench 令牌），覆盖全页 */
+  #setup {
+    position: absolute; inset: 0; z-index: 9;
+    display: flex; align-items: center; justify-content: center;
+    background: #10151b;
+  }
+  #setup[hidden] { display: none; }
+  .setup-card { width: min(420px, 84%); text-align: center; }
+  .setup-title { font-size: 15px; font-weight: 700; margin-bottom: 14px; color: #e8ebee; }
+  .bar {
+    height: 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.14);
+    overflow: hidden; margin: 0 6px;
+  }
+  .bar-fill {
+    height: 100%; width: 0%; border-radius: 999px;
+    background: #4d8fd6; transition: width .35s ease;
+  }
+  .bar-fill.indet { width: 38%; animation: setup-slide 1.1s ease-in-out infinite alternate; }
+  @keyframes setup-slide { from { margin-left: 0; } to { margin-left: 62%; } }
+  @media (prefers-reduced-motion: reduce) {
+    .bar-fill.indet { animation: none; width: 100%; opacity: .5; }
+  }
+  .setup-status { margin-top: 12px; font-size: 12.5px; color: #9aa5af; }
+  .setup-err {
+    margin-top: 12px; padding: 8px 12px; border-radius: 8px; text-align: left;
+    font-size: 12.5px; color: #ff8a7a; background: rgba(255, 90, 70, 0.12);
+    word-break: break-all;
+  }
+  /* 版本徽标：仅在不健康（引擎版本不匹配/引擎未运行）时出现，右下角不扰民 */
+  .ver-badge {
+    position: absolute; right: 10px; bottom: 8px; z-index: 5;
+    font-size: 10.5px; color: rgba(214, 217, 221, 0.45); pointer-events: none;
+    font-family: Consolas, "Cascadia Mono", monospace; white-space: nowrap;
+    display: none;
+  }
+  .ver-badge.show { display: block; }
+  .ver-badge.mismatch { color: #ffb547; opacity: 1; }
   /* 引擎初始化引导层：自成一体深色（不依赖 workbench 令牌），覆盖全页（含 tab） */
   #setup {
     position: absolute; inset: 0; z-index: 9;
@@ -105,15 +130,11 @@ export const SHELL_HTML = `<!doctype html>
     <div class="setup-err" id="setup-err" hidden></div>
   </div>
 </div>
-<div class="tabs theme-switch" role="group" aria-label="面板切换">
-  <button type="button" data-tab="groups" aria-pressed="true">群聊</button>
-  <button type="button" data-tab="disc" aria-pressed="false">讨论</button>
-  <span id="ver-badge" class="ver-badge" title="插件版本 · 存活引擎版本（引擎版本落后于插件 = 修复未生效）"></span>
-</div>
 <div class="frames">
   <iframe data-page="groups" title="Super 群聊"></iframe>
   <iframe data-page="disc" title="Super 讨论"></iframe>
 </div>
+<span id="ver-badge" class="ver-badge" title="插件版本 · 存活引擎版本（不匹配 = 修复未生效；仅异常时显示）"></span>
 <script>
 (function () {
   var base = location.pathname.replace(/\\/shell$/, '');
@@ -125,17 +146,10 @@ export const SHELL_HTML = `<!doctype html>
   try { tab = localStorage.getItem(KEY) || sessionStorage.getItem(KEY) || 'groups'; } catch (e) {}
   function apply(t) {
     tab = t;
-    document.querySelectorAll('.tabs button').forEach(function (b) {
-      b.setAttribute('aria-pressed', String(b.dataset.tab === t));
-    });
     frames[0].style.display = t === 'groups' ? 'flex' : 'none';
     frames[1].style.display = t === 'disc' ? 'flex' : 'none';
     try { sessionStorage.setItem(KEY, t); localStorage.setItem(KEY, t); } catch (e) {}
   }
-  document.querySelector('.tabs').addEventListener('click', function (e) {
-    var b = e.target && e.target.closest ? e.target.closest('button[data-tab]') : null;
-    if (b) apply(b.dataset.tab);
-  });
   window.addEventListener('message', function (ev) {
     if (ev.origin !== location.origin) return;
     var d = ev.data || {};
@@ -155,21 +169,18 @@ export const SHELL_HTML = `<!doctype html>
       if (t === 'paper' || t === 'signal') document.documentElement.dataset.theme = t;
     } catch (e) { /* 未就绪：下一轮再试 */ }
   }, 500);
-  /* 版本徽标：插件期望版本 vs 存活引擎版本——不匹配 = 修复未生效（琥珀警示） */
+  /* 版本徽标：健康（版本匹配且引擎存活）时完全隐藏，异常才现身 */
   function updateVerBadge(j) {
     var el = document.getElementById('ver-badge');
     if (!el) return;
     var pv = j && j.pluginVersion, ev = j && j.engineVersion;
-    // 诊断态（主题割裂五轮未根治）：把三个文档的真实读取值直接亮出来拿事实
-    var g = '?', d = '?';
-    try { g = frames[0].contentDocument.documentElement.dataset.theme || '—'; } catch (e) { g = 'ERR'; }
-    try { d = frames[1].contentDocument.documentElement.dataset.theme || '—'; } catch (e) { d = 'ERR'; }
-    var me = document.documentElement.dataset.theme || '—';
-    var tokens = '✗';
-    try { tokens = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() ? '✓' : '✗'; } catch (e) {}
-    el.textContent = 'shell:' + me + ' · 群:' + g + ' 讨:' + d + ' · 令牌:' + tokens +
-      ' · 插件 v' + (pv || '?') + ' 引擎 v' + (ev || '?');
-    el.className = 'ver-badge' + (pv && ev && pv !== ev ? ' mismatch' : '');
+    var mismatch = !!(pv && ev && pv !== ev);
+    var down = !j || !j.live;
+    if (!mismatch && !down) { el.className = 'ver-badge'; el.style.display = 'none'; return; }
+    el.style.display = 'block';
+    el.className = 'ver-badge' + (mismatch ? ' mismatch' : '');
+    el.textContent = (mismatch ? '版本不匹配 · ' : '') + (down ? '引擎未运行 · ' : '') +
+      '插件 v' + (pv || '?') + ' 引擎 v' + (ev || '?');
   }
   /* 引导层渲染（boot 轮询与常驻监视共用）：引擎死 → 重现引导卡；恢复 → 重载内页 */
   var shellSawDown = false;
@@ -300,7 +311,23 @@ export function createSuperRouteHandler(api: SuperApi) {
             `<script>window.__SUPER_PROXY__='${ROUTE_PREFIX}';` +
             `(function(){var of=window.fetch;window.fetch=function(u,o){` +
             `if(typeof u==='string'&&u.charAt(0)==='/'&&u.indexOf(window.__SUPER_PROXY__)!==0)u=window.__SUPER_PROXY__+u;` +
-            `return of.call(window,u,o)}})();</script>`
+            `return of.call(window,u,o)}})();` +
+            /* 内页互跳链接（← 讨论工作台 / 群聊室 →）在嵌入态转为 shell tab 切换：
+               点击拦截 + postMessage（保活容器换显 iframe，不导航、状态全保留）。
+               独立运行（无父窗/非代理路径）时照常导航，桌面版/CLI 不受影响。 */
+            `(function(){` +
+            `var pre=window.__SUPER_PROXY__+'/wb/';` +
+            `document.addEventListener('click',function(e){` +
+            `var a=e.target&&e.target.closest?e.target.closest('a[href]'):null;` +
+            `if(!a||window.parent===window)return;` +
+            `var h=a.getAttribute('href')||'';` +
+            `if(h.indexOf(pre)!==0)return;` +
+            `var rest=h.slice(pre.length).split('?')[0];` +
+            `var tab=rest==='groups'?'groups':rest===''?'disc':null;` +
+            `if(!tab)return;` +
+            `e.preventDefault();` +
+            `try{window.parent.postMessage({type:'agent-chat-tab',tab:tab},location.origin)}catch(err){}` +
+            `},true);})();</script>`
           html = /<head[^>]*>/i.test(html)
             ? html.replace(/<head[^>]*>/i, (m) => m + shim)
             : shim + html
