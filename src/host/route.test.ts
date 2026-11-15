@@ -7,6 +7,7 @@ import { describe, test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer, type Server } from 'node:http'
 import { createSuperRouteHandler, ROUTE_PREFIX } from './route.ts'
+import { PLUGIN_VERSION } from './engine.ts'
 import type { SuperApi } from './super-api.ts'
 
 describe('super route handler（/wb 复用通道 + /api 反代）', () => {
@@ -84,13 +85,14 @@ describe('super route handler（/wb 复用通道 + /api 反代）', () => {
     assert.equal(j.upstream, upstreamBase)
   })
 
-  test('/wb HTML：注入 fetch shim + 根相对资源改写到代理（外链不动）', async () => {
+  test('/wb HTML：注入 fetch shim + 根相对资源改写到代理（外链不动，带版本参数破缓存）', async () => {
     const { res, captured } = fakeRes()
     await handler(fakeReq(`${ROUTE_PREFIX}/wb/groups`), res)
     assert.equal(captured.status, 200)
-    assert.ok(captured.body!.includes(`href="${ROUTE_PREFIX}/wb/style.css"`))
-    assert.ok(captured.body!.includes(`src="${ROUTE_PREFIX}/wb/app.js"`))
-    assert.ok(captured.body!.includes(`href="${ROUTE_PREFIX}/wb/groups"`)) // 根相对锚点同样改写（站内导航走代理）
+    const v = PLUGIN_VERSION
+    assert.ok(captured.body!.includes(`href="${ROUTE_PREFIX}/wb/style.css?v=${v}"`))
+    assert.ok(captured.body!.includes(`src="${ROUTE_PREFIX}/wb/app.js?v=${v}"`))
+    assert.ok(captured.body!.includes(`href="${ROUTE_PREFIX}/wb/groups?v=${v}"`)) // 根相对锚点同样改写（站内导航走代理）
     assert.match(captured.body!, /https:\/\/example\.com/) // 外链不改写
   })
 

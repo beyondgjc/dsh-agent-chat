@@ -39,7 +39,7 @@ function resolvePluginVersion(): string {
   }
   return 'dev'
 }
-const PLUGIN_VERSION: string = resolvePluginVersion()
+export const PLUGIN_VERSION: string = resolvePluginVersion()
 
 const REPO_SLUG = 'beyondgjc/dsh-agent-chat'
 /** 缓存根（可 DSH_AGENT_CHAT_CACHE 覆盖，测试/多实例隔离用） */

@@ -10,7 +10,7 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { SuperApi } from './super-api.ts'
-import { downloadState, engineStatus, probeWorkbench } from './engine.ts'
+import { downloadState, engineStatus, PLUGIN_VERSION, probeWorkbench } from './engine.ts'
 import { nativePickDirectory } from './native-pick.ts'
 
 export const ROUTE_PREFIX = '/dsh-agent-chat-598'
@@ -253,14 +253,20 @@ export function createSuperRouteHandler(api: SuperApi) {
           html = /<head[^>]*>/i.test(html)
             ? html.replace(/<head[^>]*>/i, (m) => m + shim)
             : shim + html
-          // 根相对资源（/app.js、/style.css、/groups…）改写到代理前缀；忽略协议相对与外链
-          html = html.replace(/(href|src)="\/(?!\/)/g, `$1="${ROUTE_PREFIX}/wb/`)
+          // 根相对资源（/app.js、/style.css、/groups…）改写到代理前缀 + 追加版本参数
+          // （升级后 URL 变化强制破缓存——上游 no-store 曾被本代理非 HTML 分支丢弃，
+          //  webview 启发式缓存把旧 JS 钉死，版本更新后界面不变）
+          html = html.replace(
+            /(href|src)="\/(?!\/)([^"]*)"/g,
+            (_m, attr, path) =>
+              `${attr}="${ROUTE_PREFIX}/wb/${path}${path.includes("?") ? "&" : "?"}v=${PLUGIN_VERSION}"`,
+          )
           res.writeHead(upstream.status, { 'content-type': ctype, 'cache-control': 'no-store' })
           res.end(html)
           return
         }
         const buf = Buffer.from(await upstream.arrayBuffer())
-        res.writeHead(upstream.status, { 'content-type': ctype })
+        res.writeHead(upstream.status, { 'content-type': ctype, 'cache-control': 'no-store' })
         res.end(buf)
         return
       }
