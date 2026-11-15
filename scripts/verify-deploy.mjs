@@ -1,40 +1,74 @@
 /**
- * 部署校验：profile 里的插件副本应与源构建字节一致（pnpm file: 依赖是硬链接克隆，
- * repo 内 rebuild 自动生效）。不一致 = 硬链接断了或没装，退出码 1。
+ * 部署校验 + 自愈：profile 里的插件副本（lib 三件 + public/）应与源构建字节一致
+ * （pnpm file: 硬链接，repo 内 rebuild 自动生效）。不一致 = 硬链接被构建覆盖破坏
+ * （如 build-engine 的 cpSync 换了 inode）→ 自动重链接修复。修复失败退出码 1。
  * 用法：npm run deploy（= typecheck + test + build + 本脚本）。
  */
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, linkSync, readFileSync, readdirSync, statSync, unlinkSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { execSync } from 'node:child_process'
 
-const profileLib = join(
+const pkg = process.cwd()
+const profile = join(
   homedir(),
   '.dsh',
   'profiles',
   'desktop',
   'node_modules',
   'dsh-agent-chat',
-  'lib',
 )
 
 let ok = true
-for (const f of ['index.js', 'client.js', 'engine.js']) {
-  const src = readFileSync(join('lib', f))
-  let dst = null
-  try {
-    dst = readFileSync(join(profileLib, f))
-  } catch {
-    /* profile 缺文件 */
+
+/** 字节比对；不一致/缺失时删除旧副本并重新硬链接源文件（保留 inode，rebuild 自动同步） */
+function compareAndRelink(relSrc, relDst, label) {
+  const src = join(pkg, relSrc)
+  const dst = join(profile, relDst)
+  if (!existsSync(src)) {
+    console.log(`${label}: 源不存在 ✗`)
+    ok = false
+    return
   }
-  const same = dst !== null && src.equals(dst)
-  console.log(`${f}: ${same ? 'profile 副本一致 ✓' : 'profile 副本不一致 ✗（进 profile 目录跑 pnpm install --prod）'}`)
-  if (!same) ok = false
+  let dstBuf = null
+  try {
+    dstBuf = readFileSync(dst)
+  } catch {
+    /* 缺失 */
+  }
+  if (dstBuf && dstBuf.equals(readFileSync(src))) {
+    console.log(`${label}: ✓`)
+    return
+  }
+  try {
+    try {
+      unlinkSync(dst)
+    } catch {
+      /* 不存在 */
+    }
+    linkSync(src, dst)
+    console.log(`${label}: 已重链接 ✓`)
+  } catch (e) {
+    console.log(`${label}: 修复失败 ✗ ${e.message}`)
+    ok = false
+  }
 }
-// public/ 静态资源（引擎捆绑形态下由插件提供）
-let pubOk = existsSync(join(profileLib, '..', 'public', 'app.js'))
-console.log(`public/: ${pubOk ? 'profile 存在 ✓' : 'profile 缺失 ✗（进 profile 目录跑 pnpm install --prod）'}`)
-if (!pubOk) ok = false
+
+for (const f of ['index.js', 'client.js', 'engine.js', 'mock-agent.mjs']) {
+  compareAndRelink(join('lib', f), join('lib', f), `lib/${f}`)
+}
+
+// public/ 静态资源（引擎捆绑形态下由插件提供，扁平文件）
+const pubSrc = join(pkg, 'public')
+if (existsSync(pubSrc)) {
+  for (const name of readdirSync(pubSrc)) {
+    if (statSync(join(pubSrc, name)).isFile()) {
+      compareAndRelink(join('public', name), join('public', name), `public/${name}`)
+    }
+  }
+} else {
+  console.log('public/: 源不存在（未跑 build-engine）——跳过')
+}
 
 try {
   const st = execSync('git status --porcelain', { encoding: 'utf8' }).trim()

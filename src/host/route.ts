@@ -11,6 +11,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { SuperApi } from './super-api.ts'
 import { engineStatus } from './engine.ts'
+import { nativePickDirectory } from './native-pick.ts'
 
 export const ROUTE_PREFIX = '/dsh-agent-chat-598'
 const API_PREFIX = `${ROUTE_PREFIX}/api`
@@ -171,6 +172,22 @@ export function createSuperRouteHandler(api: SuperApi) {
         return
       }
       if (url === API_PREFIX || url.startsWith(`${API_PREFIX}/`)) {
+        // 原生目录选择：捆绑引擎（无 GUI）弹不了系统对话框 → 由插件宿主代弹
+        // （DSH Electron 主进程的 dialog）。非 DSH 形态返回 path:null，页面回退网页选择器。
+        if (req.method === 'POST' && url === `${API_PREFIX}/fs/native-pick`) {
+          const chunks: Buffer[] = []
+          for await (const chunk of req) chunks.push(chunk as Buffer)
+          let startDir: string | undefined
+          try {
+            const body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') as { cwd?: string }
+            if (typeof body.cwd === 'string' && body.cwd.trim()) startDir = body.cwd
+          } catch {
+            /* 无 body */
+          }
+          const picked = await nativePickDirectory(startDir)
+          send(200, { path: picked })
+          return
+        }
         const upstreamPath = `/api${url.slice(API_PREFIX.length)}${query}`
         const base = await api.resolveBase()
         const chunks: Buffer[] = []

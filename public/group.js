@@ -586,7 +586,8 @@ async function createGroup() {
     members.push({ appId: m.appId, label: m.label?.trim() || undefined, env });
   }
   try {
-    const r = await post("/api/groups", { name, cwd, members });
+    // 创建含接入检查（成员连接立即建立），真适配器冷启动可超 10s——放宽到 90s
+    const r = await post("/api/groups", { name, cwd, members }, { timeoutMs: 90_000 });
     showBanner(`群「${name}」已创建并完成接入检查。`, "ok");
     state.newForm = { cwd: "", members: [] };
     $("#gf-name").value = "";

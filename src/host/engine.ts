@@ -6,8 +6,9 @@
  * 引擎 bundle 缺失（构建时没有私有仓库）→ 尝试失败，回落外部实例模式。
  */
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
 export interface EngineSpawnResult {
@@ -41,6 +42,24 @@ export function engineBundlePath(): string | null {
   return existsSync(p) ? p : null
 }
 
+/**
+ * DSH 自带的控制台子系统 node（dsh-runtimes 各运行时的 dependencies/node/bin/node.exe）。
+ * agentNodeExe 的首选注入源——桌面壳注入的就是同类副本（控制台子系统 + windowsHide，
+ * agent 再 spawn 的控制台孙进程不弹窗）。找不到返回 null（回退 Electron-as-node）。
+ */
+export function dshNodeExe(): string | null {
+  const root = join(homedir(), '.dsh', 'dsh-runtimes')
+  try {
+    for (const rt of readdirSync(root)) {
+      const cand = join(root, rt, 'dependencies', 'node', 'bin', 'node.exe')
+      if (existsSync(cand)) return cand
+    }
+  } catch {
+    /* 无 runtimes 目录 */
+  }
+  return null
+}
+
 /** 拉起捆绑引擎（幂等：已有子进程直接返回成功）。就绪由调用方轮询 probe 确认。 */
 export function spawnBundledEngine(): EngineSpawnResult {
   const enginePath = engineBundlePath()
@@ -50,14 +69,48 @@ export function spawnBundledEngine(): EngineSpawnResult {
   }
   if (child) return { attempted: true, started: true }
   try {
-    // publicDir 指向插件包内 public/（lib/engine.js 的上一级）
-    child = spawn(process.execPath, [enginePath], {
-      env: {
-        ...process.env,
-        ELECTRON_RUN_AS_NODE: '1', // Electron 可执行文件按纯 node 跑；plain node 忽略此变量
-        SUPER_WORKBENCH_PORT: '0', // 动态端口，portfile 携带实际值
-        SUPER_WORKBENCH_PUBLIC_DIR: join(dirname(enginePath), '..', 'public'),
-      },
+    // publicDir 指向插件包内 public/（lib/engine.js 的上一级）。
+    // stage0/cwd/mock 对齐桌面壳的 prepareEnv()，但安装根优先级不同：
+    //   1) 构建机上的私有仓库 stage0（与引擎 bundle 同源，适配器最全）
+    //   2) 桌面版安装根（LOCALAPPDATA\SuperAgent\apps）
+    // bundle 形态下 realAgents 自己的 repoRoot 无意义，必须显式注入。
+    const libDir = dirname(enginePath)
+    const env: Record<string, string | undefined> = {
+      ...process.env,
+      SUPER_WORKBENCH_PORT: '0', // 动态端口，portfile 携带实际值
+      SUPER_WORKBENCH_PUBLIC_DIR: join(libDir, '..', 'public'),
+    }
+    const pkgDir = join(libDir, '..')
+    const repoStage0 = join(pkgDir, '..', '..', 'super-agent-zcode', 'stage0', 'apps')
+    const desktopStage0 = join(
+      process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'),
+      'SuperAgent',
+      'apps',
+    )
+    const stage0 = existsSync(repoStage0) ? repoStage0 : desktopStage0
+    if (existsSync(stage0)) {
+      env.SUPER_STAGE0_APPS = stage0 // realAgents.ts 的安装根覆盖点（多根候选的第 1 优先）
+      env.SUPER_AGENTS_CWD = stage0 // 子进程 cwd（仓库布局不存在）
+    }
+    const mockEntry = join(libDir, 'mock-agent.mjs')
+    if (existsSync(mockEntry)) env.SUPER_MOCK_ENTRY = mockEntry
+    let cmd: string
+    let args: string[]
+    const nodeExe = dshNodeExe()
+    if (nodeExe) {
+      // 首选：DSH 自带的控制台子系统真 node 跑引擎，并注入 SUPER_NODE_EXE
+      // （agentNodeExe 的首选源，与桌面壳同一机制）——agent 孙进程不弹控制台
+      cmd = nodeExe
+      args = [enginePath]
+      env.SUPER_NODE_EXE = nodeExe
+    } else {
+      // 回退：Electron 按 node 跑（GUI 子系统，agent 孙进程可能弹控制台）
+      cmd = process.execPath
+      args = [enginePath]
+      env.ELECTRON_RUN_AS_NODE = '1'
+    }
+    child = spawn(cmd, args, {
+      env,
       stdio: 'ignore',
       windowsHide: true,
     })

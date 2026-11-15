@@ -154,6 +154,15 @@ describe('super route handler（/wb 复用通道 + /api 反代）', () => {
     assert.ok('childAlive' in j.engine)
   })
 
+  test('native-pick 拦截：非 Electron 宿主 → 200 {path:null}（页面回退网页选择器），不转发上游', async () => {
+    const { res, captured } = fakeRes()
+    await handler(fakeReq(`${ROUTE_PREFIX}/api/fs/native-pick`, 'POST', '{"cwd":"C:/x"}'), res)
+    assert.equal(captured.status, 200)
+    const j = JSON.parse(captured.body!)
+    assert.equal(j.path, null) // 测试进程非 Electron 主进程 → 代弹不可用
+    assert.equal(seen.filter((s) => s.path.includes('native-pick')).length, 0) // 未转发上游
+  })
+
   test('/shell 容器页：HTML + 双内层 iframe + postMessage tab 通道 + 主题跟随', async () => {
     const { res, captured } = fakeRes()
     await handler(fakeReq(`${ROUTE_PREFIX}/shell`), res)

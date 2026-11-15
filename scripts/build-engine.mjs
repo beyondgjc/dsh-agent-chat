@@ -42,4 +42,17 @@ const pubSrc = join(engineRepo, 'packages', 'workbench', 'public')
 const pubDst = join(pkg, 'public')
 mkdirSync(pubDst, { recursive: true })
 cpSync(pubSrc, pubDst, { recursive: true })
-console.log('[engine] lib/engine.js + public/ 已产出')
+
+// mock 适配器（联调成员）：单文件 mock-agent.mjs，SUPER_MOCK_ENTRY 指向它
+await build({
+  entryPoints: [join(engineRepo, 'packages', 'mock-agent', 'src', 'main.ts')],
+  outfile: join(pkg, 'lib', 'mock-agent.mjs'),
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  target: 'node20',
+  sourcemap: false,
+  logLevel: 'warning',
+})
+
+console.log('[engine] lib/engine.js + lib/mock-agent.mjs + public/ 已产出')
