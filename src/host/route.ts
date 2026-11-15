@@ -133,6 +133,9 @@ export const SHELL_HTML = `<!doctype html>
     if (ev.origin !== location.origin) return;
     var d = ev.data || {};
     if (d.type === 'agent-chat-tab' && (d.tab === 'groups' || d.tab === 'disc')) apply(d.tab);
+    if (d.type === 'agent-chat-theme' && (d.theme === 'paper' || d.theme === 'signal')) {
+      document.documentElement.dataset.theme = d.theme;
+    }
   });
   apply(tab === 'disc' ? 'disc' : 'groups');
   /* 引擎初始化引导：轮询 /setup/status——引导层覆盖全页显示进度；引擎就绪后
@@ -238,7 +241,15 @@ export function createSuperRouteHandler(api: SuperApi) {
             `<script>window.__SUPER_PROXY__='${ROUTE_PREFIX}';` +
             `(function(){var of=window.fetch;window.fetch=function(u,o){` +
             `if(typeof u==='string'&&u.charAt(0)==='/')u=window.__SUPER_PROXY__+u;` +
-            `return of.call(window,u,o)}})();</script>`
+            `return of.call(window,u,o)}})();` +
+            /* 主题上报：内页向容器页主动广播 wb-theme（storage 事件在 DSH webview 的
+               跨 iframe 场景不触发——曾致容器页 tab 条恒为素纸色，与内页主题割裂） */
+            `(function(){var p=window.parent;function t(){try{` +
+            `p.postMessage({type:'agent-chat-theme',theme:localStorage.getItem('wb-theme')||'paper'},location.origin)` +
+            `}catch(e){}}` +
+            `window.addEventListener('storage',t);` +
+            `document.addEventListener('DOMContentLoaded',t);` +
+            `setInterval(t,1200);})();</script>`
           html = /<head[^>]*>/i.test(html)
             ? html.replace(/<head[^>]*>/i, (m) => m + shim)
             : shim + html
