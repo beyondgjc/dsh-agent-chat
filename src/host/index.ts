@@ -22,6 +22,8 @@ export const inject = ['webServer', 'tools']
 export interface Config {
   /** workbench 上游基址；留空走 portfile 发现 / 默认 7980 */
   upstream?: string
+  /** 捆绑引擎自动拉起开关（默认开）：无存活实例时 spawn lib/engine.js */
+  engineAuto?: boolean
 }
 
 export function apply(ctx: any, config: Config = {}, homeDir?: string): void {
@@ -43,18 +45,20 @@ export function apply(ctx: any, config: Config = {}, homeDir?: string): void {
 
   // 梯度 0：无存活实例时自动拉起捆绑引擎（一次性尝试 + 20s 就绪轮询；dispose 回收子进程）。
   // 有桌面版/CLI 在跑时探测即命中，不会重复拉起。失败只降级（红横幅自愈照旧），不阻断插件。
-  ctx.effect(
-    () => {
-      void (async () => {
-        try {
-          const r = await ensureEngine(() => api.resolveBase())
-          if (!r.live) console.warn('[dsh-agent-chat] 引擎不可用：', engineStatus().lastError)
-        } catch (error) {
-          console.warn('[dsh-agent-chat] 引擎初始化异常（忽略）：', error)
-        }
-      })()
-      return () => killEngine()
-    },
-    'dsh-agent-chat: bundled engine',
-  )
+  if (config.engineAuto !== false) {
+    ctx.effect(
+      () => {
+        void (async () => {
+          try {
+            const r = await ensureEngine(() => api.resolveBase())
+            if (!r.live) console.warn('[dsh-agent-chat] 引擎不可用：', engineStatus().lastError)
+          } catch (error) {
+            console.warn('[dsh-agent-chat] 引擎初始化异常（忽略）：', error)
+          }
+        })()
+        return () => killEngine()
+      },
+      'dsh-agent-chat: bundled engine',
+    )
+  }
 }

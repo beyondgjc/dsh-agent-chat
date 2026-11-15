@@ -4,11 +4,13 @@
 //      前导 ';' 抵消多插件 combo 拼接的 ASI 歧义。
 //   2) 宿主半侧（index → lib/index.js）：保持 ESM，由 DSH 的 Loader import，绝不能包 IIFE。
 //   @deepseek-ai/*、react 一律外部化（由 DSH 宿主/页面平台模块提供）。
-import { dirname, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { readFileSync } from 'node:fs'
 import { defineConfig } from 'tsdown'
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)))
+export const pluginVersion = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8')).version
 
 const shared = {
   platform: 'node',
@@ -32,5 +34,6 @@ export default defineConfig([
     ...shared,
     entry: { index: 'src/host/index.ts' },
     external: [/^@deepseek-ai\//, /^node:/],
+    define: { __PLUGIN_VERSION__: JSON.stringify(pluginVersion) },
   },
 ])

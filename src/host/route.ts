@@ -10,7 +10,7 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { SuperApi } from './super-api.ts'
-import { engineStatus } from './engine.ts'
+import { downloadState, engineStatus, probeWorkbench } from './engine.ts'
 import { nativePickDirectory } from './native-pick.ts'
 
 export const ROUTE_PREFIX = '/dsh-agent-chat-598'
@@ -100,15 +100,28 @@ export const SHELL_HTML = `<!doctype html>
     if (d.type === 'agent-chat-tab' && (d.tab === 'groups' || d.tab === 'disc')) apply(d.tab);
   });
   apply(tab === 'disc' ? 'disc' : 'groups');
-  /* 引擎初始化失败时给出引导（成功/外部实例模式不显示） */
-  fetch(base + '/setup/status').then(function (r) { return r.json(); }).then(function (j) {
-    var err = j && j.engine && j.engine.lastError;
-    if (!err) return;
-    var el = document.getElementById('setup-hint');
-    if (!el) return;
-    el.textContent = '本地引擎未能自动启动：' + err;
-    el.hidden = false;
-  }).catch(function () {});
+  /* 引擎初始化引导：轮询 /setup/status——下载中显示进度，失败显示原因，就绪后隐藏 */
+  (function pollSetup(tries) {
+    fetch(base + '/setup/status').then(function (r) { return r.json(); }).then(function (j) {
+      var el = document.getElementById('setup-hint');
+      if (!el) return;
+      if (j.live) { el.hidden = true; return; }
+      var d = j.download || {};
+      var msg = null;
+      if (d.phase === 'downloading') {
+        var pct = d.total ? Math.round((d.received / d.total) * 100) : 0;
+        msg = '正在初始化引擎：' + (d.file || '') + ' ' + pct + '%（首次约 1MB）';
+      } else if (j.engine && j.engine.lastError) {
+        msg = '本地引擎未能自动启动：' + j.engine.lastError;
+      }
+      if (msg) { el.textContent = msg; el.hidden = false; }
+      if (tries < 600 && !j.live && !(j.engine && j.engine.lastError)) {
+        setTimeout(function () { pollSetup(tries + 1); }, 800);
+      }
+    }).catch(function () {
+      if (tries < 600) setTimeout(function () { pollSetup(tries + 1); }, 800);
+    });
+  })(0);
 })();
 </script>
 </body>
@@ -133,9 +146,16 @@ export function createSuperRouteHandler(api: SuperApi) {
         send(200, { ok: true, upstream: await api.resolveBase() })
         return
       }
-      // /setup/status —— 引擎初始化状态（shell 引导横幅/调试用）
+      // /setup/status —— 引擎初始化状态（shell 引导横幅/下载进度/调试用）
       if (url === `${ROUTE_PREFIX}/setup/status`) {
-        send(200, { ok: true, upstream: await api.resolveBase(), engine: engineStatus() })
+        const base = await api.resolveBase()
+        send(200, {
+          ok: true,
+          upstream: base,
+          live: await probeWorkbench(base),
+          engine: engineStatus(),
+          download: downloadState,
+        })
         return
       }
       // /shell —— 插件自持的 tab 容器页（客户端唯一 iframe 指向这里）

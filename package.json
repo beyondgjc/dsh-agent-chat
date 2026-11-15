@@ -19,8 +19,10 @@
   "scripts": {
     "build": "tsdown && node scripts/build-engine.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --test src/host/super-api.test.ts src/host/apply.test.ts src/host/route.test.ts src/host/engine.test.ts",
-    "deploy": "npm run typecheck && npm test && npm run build && node scripts/verify-deploy.mjs"
+    "test": "node --test src/host/super-api.test.ts src/host/apply.test.ts src/host/route.test.ts src/host/engine.test.ts src/host/engine-download.test.ts",
+    "deploy": "npm run typecheck && npm test && npm run build && node scripts/verify-deploy.mjs",
+    "pack:artifact": "node scripts/pack-engine-artifact.mjs",
+    "publish-engine": "node scripts/publish-engine.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.4",
@@ -28,8 +30,10 @@
     "react": "^18.2.0"
   },
   "devDependencies": {
+    "@types/adm-zip": "^0.5.8",
     "@types/node": "^22.10.0",
     "@types/react": "^18.3.0",
+    "adm-zip": "^0.6.1",
     "esbuild": "^0.28.2",
     "tsdown": "^0.12.9",
     "typescript": "^5.7.0"
