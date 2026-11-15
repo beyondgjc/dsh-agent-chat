@@ -160,7 +160,15 @@ export const SHELL_HTML = `<!doctype html>
     var el = document.getElementById('ver-badge');
     if (!el) return;
     var pv = j && j.pluginVersion, ev = j && j.engineVersion;
-    el.textContent = '插件 v' + (pv || '?') + ' · 引擎 ' + (ev ? 'v' + ev : '未运行');
+    // 诊断态（主题割裂五轮未根治）：把三个文档的真实读取值直接亮出来拿事实
+    var g = '?', d = '?';
+    try { g = frames[0].contentDocument.documentElement.dataset.theme || '—'; } catch (e) { g = 'ERR'; }
+    try { d = frames[1].contentDocument.documentElement.dataset.theme || '—'; } catch (e) { d = 'ERR'; }
+    var me = document.documentElement.dataset.theme || '—';
+    var tokens = '✗';
+    try { tokens = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() ? '✓' : '✗'; } catch (e) {}
+    el.textContent = 'shell:' + me + ' · 群:' + g + ' 讨:' + d + ' · 令牌:' + tokens +
+      ' · 插件 v' + (pv || '?') + ' 引擎 v' + (ev || '?');
     el.className = 'ver-badge' + (pv && ev && pv !== ev ? ' mismatch' : '');
   }
   /* 引导层渲染（boot 轮询与常驻监视共用）：引擎死 → 重现引导卡；恢复 → 重载内页 */
