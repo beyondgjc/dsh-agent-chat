@@ -15,6 +15,9 @@ import { nativePickDirectory } from './native-pick.ts'
 
 export const ROUTE_PREFIX = '/dsh-agent-chat-598'
 const API_PREFIX = `${ROUTE_PREFIX}/api`
+
+/** 主题权威源（host 内存态，进程生命周期）：最后一位真实切换者的意图 */
+let uiTheme: 'paper' | 'signal' | null = null
 const WB_PREFIX = `${ROUTE_PREFIX}/wb`
 
 /**
@@ -30,10 +33,16 @@ export const SHELL_HTML = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Agent Chat</title>
 <script>
-/* 主题跟随：与内层 workbench 页共用 wb-theme（shell 是独立文档，不继承 DSH/内页颜色）；
-   内页切主题时经 storage 事件同步；加载 workbench 自己的 style.css 复用同一套令牌 */
+/* 主题跟随 v2：初始 = localStorage 记忆 > 系统深浅色 > 素纸（与 workbench 页同逻辑，
+   避免 shell 判 light 而内页判 dark 的起始分裂）；此后以 host /api/theme 权威值为准
+   轮询对齐（storage 事件/postMessage 在 DSH webview 跨 iframe 不可依赖）。 */
 (function () {
-  try { document.documentElement.dataset.theme = localStorage.getItem('wb-theme') || 'paper'; } catch (e) {}
+  var t = null;
+  try { t = localStorage.getItem('wb-theme'); } catch (e) {}
+  if (t !== 'paper' && t !== 'signal') {
+    t = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'signal' : 'paper';
+  }
+  document.documentElement.dataset.theme = t;
   var base = location.pathname.replace(/\\/shell$/, '');
   var link = document.createElement('link');
   link.rel = 'stylesheet';
@@ -42,6 +51,11 @@ export const SHELL_HTML = `<!doctype html>
   window.addEventListener('storage', function (e) {
     if (e.key === 'wb-theme' && e.newValue) document.documentElement.dataset.theme = e.newValue;
   });
+  setInterval(function () {
+    fetch(base + '/api/theme').then(function (r) { return r.json(); }).then(function (j) {
+      if (j.theme === 'paper' || j.theme === 'signal') document.documentElement.dataset.theme = j.theme;
+    }).catch(function () {});
+  }, 1200);
 })();
 </script>
 <style>
@@ -240,16 +254,24 @@ export function createSuperRouteHandler(api: SuperApi) {
           const shim =
             `<script>window.__SUPER_PROXY__='${ROUTE_PREFIX}';` +
             `(function(){var of=window.fetch;window.fetch=function(u,o){` +
-            `if(typeof u==='string'&&u.charAt(0)==='/')u=window.__SUPER_PROXY__+u;` +
+            `if(typeof u==='string'&&u.charAt(0)==='/'&&u.indexOf(window.__SUPER_PROXY__)!==0)u=window.__SUPER_PROXY__+u;` +
             `return of.call(window,u,o)}})();` +
-            /* 主题上报：内页向容器页主动广播 wb-theme（storage 事件在 DSH webview 的
-               跨 iframe 场景不触发——曾致容器页 tab 条恒为素纸色，与内页主题割裂） */
-            `(function(){var p=window.parent;function t(){try{` +
-            `p.postMessage({type:'agent-chat-theme',theme:localStorage.getItem('wb-theme')||'paper'},location.origin)` +
-            `}catch(e){}}` +
-            `window.addEventListener('storage',t);` +
-            `document.addEventListener('DOMContentLoaded',t);` +
-            `setInterval(t,1200);})();</script>`
+            /* 主题同步 v2：以 host 为权威源。页面只在真实切换（data-theme 突变）时
+               POST 自己的新主题；DOMContentLoaded 与轮询只 GET 并向权威值对齐——
+               不再周期性上报本页视图（webview 存储分区/matchMedia 继承会让两个
+               内页视图相左，周期上报 = 容器页主题被打摆）。 */
+            `(function(){var p=window.parent;` +
+            `function cur(){return document.documentElement.dataset.theme||'paper'}` +
+            `function apply(t){if(t!==cur()){document.documentElement.dataset.theme=t;` +
+            `try{localStorage.setItem('wb-theme',t)}catch(e){}}}` +
+            `function post(){try{fetch(window.__SUPER_PROXY__+'/api/theme',{method:'POST',` +
+            `headers:{'content-type':'application/json'},body:JSON.stringify({theme:cur()})})}catch(e){}}` +
+            `function sync(){try{fetch(window.__SUPER_PROXY__+'/api/theme')` +
+            `.then(function(r){return r.json()}).then(function(j){` +
+            `if(j.theme==='paper'||j.theme==='signal')apply(j.theme)}).catch(function(){})}catch(e){}}` +
+            `new MutationObserver(post).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});` +
+            `document.addEventListener('DOMContentLoaded',function(){post();sync();});` +
+            `setInterval(sync,1200);})();</script>`
           html = /<head[^>]*>/i.test(html)
             ? html.replace(/<head[^>]*>/i, (m) => m + shim)
             : shim + html
@@ -271,6 +293,25 @@ export function createSuperRouteHandler(api: SuperApi) {
         return
       }
       if (url === API_PREFIX || url.startsWith(`${API_PREFIX}/`)) {
+        // 主题权威源：shell 与两个内层 iframe 的主题视图互不可信（webview 存储分区/
+        // matchMedia 继承各自为政，曾致容器页与内页主题割裂、双页上报互相打摆）。
+        // 页面仅在真实切换（data-theme 突变）时 POST，host 记忆最后意图，所有人向它对齐。
+        if (url === `${API_PREFIX}/theme` && req.method === 'POST') {
+          const chunks: Buffer[] = []
+          for await (const chunk of req) chunks.push(chunk as Buffer)
+          try {
+            const body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') as { theme?: string }
+            if (body.theme === 'paper' || body.theme === 'signal') uiTheme = body.theme
+          } catch {
+            /* 无 body */
+          }
+          send(200, { theme: uiTheme })
+          return
+        }
+        if (url === `${API_PREFIX}/theme` && req.method === 'GET') {
+          send(200, { theme: uiTheme })
+          return
+        }
         // 原生目录选择：捆绑引擎（无 GUI）弹不了系统对话框 → 由插件宿主代弹
         // （DSH Electron 主进程的 dialog）。非 DSH 形态返回 path:null，页面回退网页选择器。
         if (req.method === 'POST' && url === `${API_PREFIX}/fs/native-pick`) {
