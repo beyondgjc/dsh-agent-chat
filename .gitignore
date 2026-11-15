@@ -12,3 +12,6 @@ lib/
 *.swp
 .DS_Store
 Thumbs.db
+
+# 引擎 artifact 构建产物（走 Releases 分发，不入库）
+dist/
