@@ -145,18 +145,15 @@ export const SHELL_HTML = `<!doctype html>
     }
   });
   apply(tab === 'disc' ? 'disc' : 'groups');
-  /* 主题跟随：同源直读内层 iframe 的 data-theme（内层 head 同步设定，首帧前就有值）。
-     DOM 直读是 web 平台保底能力——不经存储/事件/宿主（DSH webview 教训）。 */
+  /* 主题跟随：同源直读「当前可见」内层 iframe 的 data-theme（500ms）。
+     只读可见页——DSH 里两个内页存储分区各自为政（主题可能不同步），
+     跟随可见页 = tab 条永远与用户眼前的一致；切 tab 即切跟随对象。 */
   setInterval(function () {
-    for (var i = 0; i < frames.length; i++) {
-      try {
-        var t = frames[i].contentDocument && frames[i].contentDocument.documentElement.dataset.theme;
-        if (t === 'paper' || t === 'signal') {
-          document.documentElement.dataset.theme = t;
-          return;
-        }
-      } catch (e) { /* 跨源/未就绪：下一轮再试 */ }
-    }
+    var f = frames[tab === 'disc' ? 1 : 0];
+    try {
+      var t = f.contentDocument && f.contentDocument.documentElement.dataset.theme;
+      if (t === 'paper' || t === 'signal') document.documentElement.dataset.theme = t;
+    } catch (e) { /* 未就绪：下一轮再试 */ }
   }, 500);
   /* 版本徽标：插件期望版本 vs 存活引擎版本——不匹配 = 修复未生效（琥珀警示） */
   function updateVerBadge(j) {
