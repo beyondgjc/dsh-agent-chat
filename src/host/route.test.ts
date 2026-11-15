@@ -165,7 +165,7 @@ describe('super route handler（/wb 复用通道 + /api 反代）', () => {
     assert.equal(seen.filter((s) => s.path.includes('native-pick')).length, 0) // 未转发上游
   })
 
-  test('/shell 容器页：HTML + 双内层 iframe + postMessage tab 通道 + 主题无关中性 chrome', async () => {
+  test('/shell 容器页：HTML + 双内层 iframe + postMessage tab 通道 + 主题同源直读', async () => {
     const { res, captured } = fakeRes()
     await handler(fakeReq(`${ROUTE_PREFIX}/shell`), res)
     assert.equal(captured.status, 200)
@@ -175,11 +175,12 @@ describe('super route handler（/wb 复用通道 + /api 反代）', () => {
     assert.ok(captured.body!.includes(`'agent-chat-tab'`)) // 导航服务 postMessage 通道
     assert.ok(captured.body!.includes(`data-page="groups"`))
     assert.ok(captured.body!.includes(`data-page="disc"`))
-    // 主题无关化（v0.2.13 定案）：不再读取/同步任何主题——三轮运行时同步在 DSH
-    // webview 全部不可依赖，问题类拆除；样式自成一体，不引 workbench 令牌
-    assert.ok(!captured.body!.includes(`wb-theme`))
-    assert.ok(!captured.body!.includes(`/api/theme`))
-    assert.ok(!captured.body!.includes(`/wb/style.css`))
+    // 主题跟随 v3：同源直读内层 iframe 的 data-theme（web 平台保底能力）——
+    // 不经存储读取/事件/宿主中转（DSH webview 教训）；令牌样式表随 base 注入
+    assert.ok(!captured.body!.includes(`localStorage.getItem('wb-theme')`)) // 不读存储
+    assert.ok(!captured.body!.includes(`/api/theme`)) // 不经宿主
+    assert.ok(captured.body!.includes(`wb-tokens`)) // 令牌样式表占位
+    assert.ok(captured.body!.includes(`contentDocument.documentElement.dataset.theme`)) // 直读 DOM
     assert.ok(captured.body!.includes(`ver-badge`)) // 版本徽标保留
     assert.ok(captured.body!.includes(`setup-card`)) // 引导层保留（自成一体深色）
   })

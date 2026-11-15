@@ -29,36 +29,45 @@ export const SHELL_HTML = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Agent Chat</title>
+<link id="wb-tokens" rel="stylesheet">
+<script>
+/* 令牌样式表：workbench 的 theme 变量（href 需要 base，head 内联推导） */
+(function () {
+  var b = location.pathname.replace(/\\/shell$/, '');
+  var l = document.getElementById('wb-tokens');
+  if (l) l.href = b + '/wb/style.css';
+})();
+</script>
 <style>
-  /* 主题无关的中性 chrome（v0.2.13 定案）：容器页不再跟随/同步 workbench 主题——
-     三轮运行时同步（storage 事件/postMessage/host 权威源）在 DSH webview 里全部
-     不可依赖，问题类就此拆除：透明底融入 DSH 外壳，固定深色引导层自成一体 */
+  /* 主题跟随 v3（v0.2.15）：同源直读内层 iframe 的 DOM——内层页在 head 里同步设定
+     data-theme（首帧绘制前），shell 每 500ms 直读该属性套用同一套 workbench 令牌。
+     不经存储/事件/宿主中转（三轮运行时同步在 DSH webview 里的教训），纯同源 DOM
+     读取是 web 平台保底能力。内层未就绪时保持深色底（与引导层一致）。 */
   html, body { height: 100%; margin: 0; padding: 0; }
   body {
     position: relative;
     display: flex; flex-direction: column;
-    /* 不透明深色石墨：透明底会透出 DSH webview 的默认白（v0.2.13 实测），固定深色
-       与 DSH 深色界面、引导层一致；workbench 页自管主题（素纸时形成浏览器式分隔） */
     background: #10151b; color: #d6d9dd;
     font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
   }
+  html[data-theme="paper"] body { background: var(--bg); color: var(--text); }
+  html[data-theme="signal"] body { background: var(--bg); color: var(--text); }
   .tabs {
     display: flex; gap: 6px; padding: 8px 10px; align-items: center;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.09);
-    background: rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid var(--line, rgba(255, 255, 255, 0.09));
   }
   .ver-badge {
-    margin-left: auto; font-size: 11px; color: rgba(214, 217, 221, 0.55);
+    margin-left: auto; font-size: 11px; color: var(--muted, rgba(214, 217, 221, 0.55));
     font-family: Consolas, "Cascadia Mono", monospace; white-space: nowrap;
   }
   .ver-badge.mismatch { color: #ffb547; opacity: 1; font-weight: 700; }
   .tabs button {
     font-size: 13px; padding: 4px 16px; border-radius: 6px;
-    border: 1px solid rgba(128, 128, 128, 0.38); background: transparent;
-    color: #b8bcbf; cursor: pointer;
+    border: 1px solid var(--line, rgba(255, 255, 255, 0.14)); background: transparent;
+    color: var(--text, #b8bcbf); cursor: pointer;
   }
   .tabs button[aria-pressed="true"] {
-    font-weight: 700; background: rgba(255, 255, 255, 0.13); color: #ffffff;
+    font-weight: 700; background: var(--sel-soft, rgba(255, 255, 255, 0.13)); color: var(--sel, #ffffff);
   }
   .frames { flex: 1; display: flex; min-height: 0; }
   .frames iframe { flex: 1; width: 100%; border: none; display: none; background: #10151b; }
@@ -141,6 +150,19 @@ export const SHELL_HTML = `<!doctype html>
     }
   });
   apply(tab === 'disc' ? 'disc' : 'groups');
+  /* 主题跟随：同源直读内层 iframe 的 data-theme（内层 head 同步设定，首帧前就有值）。
+     DOM 直读是 web 平台保底能力——不经存储/事件/宿主（DSH webview 教训）。 */
+  setInterval(function () {
+    for (var i = 0; i < frames.length; i++) {
+      try {
+        var t = frames[i].contentDocument && frames[i].contentDocument.documentElement.dataset.theme;
+        if (t === 'paper' || t === 'signal') {
+          document.documentElement.dataset.theme = t;
+          return;
+        }
+      } catch (e) { /* 跨源/未就绪：下一轮再试 */ }
+    }
+  }, 500);
   /* 版本徽标：插件期望版本 vs 存活引擎版本——不匹配 = 修复未生效（琥珀警示） */
   function updateVerBadge(j) {
     var el = document.getElementById('ver-badge');
