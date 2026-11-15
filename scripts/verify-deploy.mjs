@@ -96,6 +96,9 @@ function syncTree(relDir) {
 
 syncTree('lib')
 syncTree('public')
+// package.json（版本真源）：engine.ts 运行时读它解析 PLUGIN_VERSION；pnpm file: 安装
+// 时拷贝一次后不再更新，版本升了不同步会让首启下载去拉不存在的旧版 Release
+compareAndRelink('package.json', 'package.json', 'package.json')
 
 try {
   const st = execSync('git status --porcelain', { encoding: 'utf8' }).trim()

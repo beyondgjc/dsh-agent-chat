@@ -20,8 +20,26 @@ import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
 declare const __PLUGIN_VERSION__: string | undefined
-const PLUGIN_VERSION: string =
-  typeof __PLUGIN_VERSION__ !== 'undefined' ? __PLUGIN_VERSION__ : 'dev'
+
+/**
+ * 插件版本解析：构建期 define（tsdown/rolldown）→ 运行时读包版本 → 'dev'。
+ * 不能只信 define：rolldown 管线下 define 曾静默失效（产物保留标识符，运行时落
+ * 'dev' → 首启下载被跳过）；package.json 是同一真源（config 的 define 也取自它），
+ * 且 verify-deploy 会把它同步进 profile，任何安装形态都读得到。
+ */
+function resolvePluginVersion(): string {
+  if (typeof __PLUGIN_VERSION__ !== 'undefined' && __PLUGIN_VERSION__) return __PLUGIN_VERSION__
+  try {
+    const pkg = JSON.parse(
+      readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8'),
+    ) as { version?: string }
+    if (typeof pkg.version === 'string' && pkg.version) return pkg.version
+  } catch {
+    /* 无包上下文（eval/异常布局） */
+  }
+  return 'dev'
+}
+const PLUGIN_VERSION: string = resolvePluginVersion()
 
 const REPO_SLUG = 'beyondgjc/dsh-agent-chat'
 /** 缓存根（可 DSH_AGENT_CHAT_CACHE 覆盖，测试/多实例隔离用） */
