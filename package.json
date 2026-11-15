@@ -1,6 +1,6 @@
 {
   "name": "dsh-agent-chat",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "把 Super Agent 群聊（本机 workbench）接入 dsh：agent 工具 + 群聊板面侧栏",
   "type": "module",
   "main": "lib/index.js",
