@@ -53,22 +53,17 @@ export const SHELL_HTML = `<!doctype html>
   html[data-theme="paper"] body { background: var(--bg); color: var(--text); }
   html[data-theme="signal"] body { background: var(--bg); color: var(--text); }
   .tabs {
-    display: flex; gap: 6px; padding: 8px 10px; align-items: center;
+    display: flex; gap: 10px; padding: 8px 10px; align-items: center;
     border-bottom: 1px solid var(--line, rgba(255, 255, 255, 0.09));
   }
+  /* tab 胶囊复用 workbench 的 .theme-switch 组件样式（同源已加载其 style.css）——
+     与内容页控件同一设计语言，主题令牌同步生效，不再自定义外观搞特殊 */
+  .tabs.theme-switch { margin-left: 0; }
   .ver-badge {
     margin-left: auto; font-size: 11px; color: var(--muted, rgba(214, 217, 221, 0.55));
     font-family: Consolas, "Cascadia Mono", monospace; white-space: nowrap;
   }
   .ver-badge.mismatch { color: #ffb547; opacity: 1; font-weight: 700; }
-  .tabs button {
-    font-size: 13px; padding: 4px 16px; border-radius: 6px;
-    border: 1px solid var(--line, rgba(255, 255, 255, 0.14)); background: transparent;
-    color: var(--text, #b8bcbf); cursor: pointer;
-  }
-  .tabs button[aria-pressed="true"] {
-    font-weight: 700; background: var(--sel-soft, rgba(255, 255, 255, 0.13)); color: var(--sel, #ffffff);
-  }
   .frames { flex: 1; display: flex; min-height: 0; }
   .frames iframe { flex: 1; width: 100%; border: none; display: none; background: #10151b; }
   /* 引擎初始化引导层：自成一体深色（不依赖 workbench 令牌），覆盖全页（含 tab） */
@@ -110,7 +105,7 @@ export const SHELL_HTML = `<!doctype html>
     <div class="setup-err" id="setup-err" hidden></div>
   </div>
 </div>
-<div class="tabs">
+<div class="tabs theme-switch" role="group" aria-label="面板切换">
   <button type="button" data-tab="groups" aria-pressed="true">群聊</button>
   <button type="button" data-tab="disc" aria-pressed="false">讨论</button>
   <span id="ver-badge" class="ver-badge" title="插件版本 · 存活引擎版本（引擎版本落后于插件 = 修复未生效）"></span>
