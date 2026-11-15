@@ -15,7 +15,7 @@ Tier 1 薄插件：**不嵌引擎、不改 Super Agent 架构**，宿主半侧�
   "生命周期由人在面板操作"的边界都在里面
 - **HTTP 前缀 `/dsh-agent-chat-598`**：后缀 598 是个人命名空间标记（与 ~/.dsh 的
   whale598 / persona-presets-598 同一约定）；cordis bundle id 全局唯一，前缀本不会撞，纯惯例
-- **侧栏板面**：DSH 侧边栏 agent-chat 图标 → 双 tab（群聊 | 讨论）iframe，复用 workbench 完整 UI
+- **侧栏板面**：DSH 侧边栏 agent-chat 图标 → 单一 iframe 指向插件自持的 `/dsh-agent-chat-598/shell` 容器页（tab 栏 + 群聊|讨论 两个常驻内层 iframe，经 /wb 代理复用 workbench 完整 UI）；面板切换停靠保活，tab 态记 localStorage
 - **`agentChatApi` cordis 服务**：其他插件可在宿主半侧 `ctx.get('agentChatApi')` 复用同一客户端
 
 ## 安装

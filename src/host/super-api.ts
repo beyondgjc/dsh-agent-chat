@@ -17,6 +17,16 @@ function trimBase(raw: string): string {
   return raw.replace(/\/+$/, '')
 }
 
+/** pid 存活探测（process.kill(pid,0) 即存在性检查；EPERM = 存在但无权限，也算活着） */
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return (err as NodeJS.ErrnoException)?.code === 'EPERM'
+  }
+}
+
 async function readPortfile(): Promise<string | null> {
   // SUPER_AGENT_DATA_DIR 是整体覆盖：设了就只查它（测试/多实例隔离），否则查默认数据目录
   const dir =
@@ -24,7 +34,18 @@ async function readPortfile(): Promise<string | null> {
     join(homedir(), 'Documents', 'SuperAgent')
   try {
     const raw = (await readFile(join(dir, 'workbench.port'), 'utf8')).trim()
+    // 旧格式：纯端口（桌面版 0.3.x 写入）——直接信任
     if (/^\d{2,5}$/.test(raw)) return raw
+    // 新格式：JSON {port, pid, startedAt}——pid 已死视为残留 portfile，
+    // 不再回退读取（否则端口被系统复用时可能连到陌生服务）
+    try {
+      const j = JSON.parse(raw) as { port?: number; pid?: number }
+      if (typeof j.port === 'number' && typeof j.pid === 'number') {
+        return pidAlive(j.pid) ? String(j.port) : null
+      }
+    } catch {
+      /* 非 JSON：忽略 */
+    }
   } catch {
     /* 无 portfile */
   }
@@ -96,7 +117,7 @@ export interface SuperGroupSummary {
 export interface BoardMessage {
   seq: number
   at: string
-  author: { kind: 'user' | 'agent' | 'system'; episodeId?: string; label?: string }
+  author: { kind: 'user' | 'agent' | 'system'; episodeId?: string; label?: string; via?: string }
   text: string
   mentions: string[]
   stale?: boolean
@@ -107,7 +128,12 @@ export interface SuperApi {
   resolveBase(): Promise<string>
   listGroups(): Promise<SuperGroupSummary[]>
   getBoard(groupId: string, after?: number): Promise<BoardMessage[]>
-  postMessage(groupId: string, text: string, mentions?: string[]): Promise<{ message: BoardMessage }>
+  postMessage(
+    groupId: string,
+    text: string,
+    mentions?: string[],
+    via?: string,
+  ): Promise<{ message: BoardMessage }>
   createGroup(input: {
     name: string
     cwd: string
@@ -176,11 +202,15 @@ export function createSuperApi(configuredUpstream?: string): SuperApi {
       }
       return j.messages ?? []
     },
-    async postMessage(groupId, text, mentions) {
+    async postMessage(groupId, text, mentions, via) {
       const b = await base()
       const j = (await requestJson(b, `/api/groups/${encodeURIComponent(groupId)}/messages`, {
         method: 'POST',
-        body: JSON.stringify({ text, ...(mentions?.length ? { mentions } : {}) }),
+        body: JSON.stringify({
+          text,
+          ...(mentions?.length ? { mentions } : {}),
+          ...(via ? { via } : {}),
+        }),
       })) as { message: BoardMessage }
       return j
     },

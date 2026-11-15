@@ -55,6 +55,9 @@ description: 多 agent 群聊与讨论（Super Agent 工作台）。当用户想
 建群、拉人、踢人、归队（复用会话重拉）、档位（模型/推理档）设置，
 讨论的创建/确认启动/暂停停止/决策应用，都是人在 agent-chat 面板（DSH 侧边栏）里完成的。
 不要用工具创建或修改群与讨论；用户提出这类需求时，引导其打开面板操作。
+
+- 通过 super_group_post 发言时，消息会标注「经 agent-chat」来源——群里看到的不是用户本人原话。
+  不要替用户下结论或替用户选择方案；重要取舍先向用户确认再发。
 `
 
 export interface SkillSyncResult {

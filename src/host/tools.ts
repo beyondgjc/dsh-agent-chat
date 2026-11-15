@@ -68,16 +68,18 @@ export function registerSuperTools(ctx: any, api: SuperApi): void {
         defineTool({
           name: 'super_group_post',
           description:
-            '向 Super Agent 群发一条消息（用户身份）。默认全体在群成员各回一合；'
+            '向 Super Agent 群发一条消息。默认全体在群成员各回一合；'
             + 'text 里写 @显示名 可只点名特定成员（名字要写准确）。一条消息把需求说完整，别拆碎。'
-            + '发送后返回落板的消息。',
+            + '⚠ 你发的消息会以「用户（经 agent-chat）」标注来源——那是你的话，不是用户本人的决定；'
+            + '重要取舍先向用户确认，不要替用户下结论。发送后返回落板的消息。',
           parameters: {
             groupId: GROUP_ID_PARAM,
             text: { type: 'string', required: true, description: '消息正文（可含 @显示名 点名）' },
           },
           output: { schema: { type: 'json' }, render: renderJson },
           async execute(args: { groupId: string; text: string }) {
-            const m = (await api.postMessage(args.groupId, args.text)).message
+            // 来源标注：工具通道的消息与用户本人原话在板面上区分
+            const m = (await api.postMessage(args.groupId, args.text, undefined, 'agent-chat')).message
             return {
               seq: m.seq,
               author: authorLabel(m),

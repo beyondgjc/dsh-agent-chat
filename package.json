@@ -15,7 +15,8 @@
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc --noEmit",
-    "test": "node --test src/host/super-api.test.ts src/host/apply.test.ts"
+    "test": "node --test src/host/super-api.test.ts src/host/apply.test.ts src/host/route.test.ts",
+    "deploy": "npm run typecheck && npm test && npm run build && node scripts/verify-deploy.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.4",
