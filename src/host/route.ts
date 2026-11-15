@@ -47,6 +47,7 @@ export const SHELL_HTML = `<!doctype html>
 <style>
   html, body { height: 100%; margin: 0; padding: 0; }
   body {
+    position: relative;
     display: flex; flex-direction: column;
     background: var(--bg); color: var(--text); font-family: var(--font-ui);
   }
@@ -59,11 +60,45 @@ export const SHELL_HTML = `<!doctype html>
   .tabs button[aria-pressed="true"] { font-weight: 700; background: var(--sel-soft); color: var(--sel); }
   .frames { flex: 1; display: flex; min-height: 0; }
   .frames iframe { flex: 1; width: 100%; border: none; display: none; background: var(--bg); }
-  .setup-hint { padding: 8px 12px; font-size: 12.5px; color: var(--bad); background: var(--bad-soft); }
+  /* 引擎初始化引导层：覆盖全页（含 tab），就绪后整体退场并按需重载内页 */
+  #setup {
+    position: absolute; inset: 0; z-index: 9;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg);
+  }
+  #setup[hidden] { display: none; }
+  .setup-card { width: min(420px, 84%); text-align: center; }
+  .setup-title { font-size: 15px; font-weight: 700; margin-bottom: 14px; }
+  .bar {
+    height: 8px; border-radius: 999px; background: var(--line);
+    overflow: hidden; margin: 0 6px;
+  }
+  .bar-fill {
+    height: 100%; width: 0%; border-radius: 999px;
+    background: var(--sel); transition: width .35s ease;
+  }
+  .bar-fill.indet { width: 38%; animation: setup-slide 1.1s ease-in-out infinite alternate; }
+  @keyframes setup-slide { from { margin-left: 0; } to { margin-left: 62%; } }
+  @media (prefers-reduced-motion: reduce) {
+    .bar-fill.indet { animation: none; width: 100%; opacity: .5; }
+  }
+  .setup-status { margin-top: 12px; font-size: 12.5px; color: var(--text); opacity: .75; }
+  .setup-err {
+    margin-top: 12px; padding: 8px 12px; border-radius: 8px; text-align: left;
+    font-size: 12.5px; color: var(--bad); background: var(--bad-soft);
+    word-break: break-all;
+  }
 </style>
 </head>
 <body>
-<div id="setup-hint" class="setup-hint" hidden></div>
+<div id="setup" hidden>
+  <div class="setup-card">
+    <div class="setup-title">正在准备本地引擎</div>
+    <div class="bar"><div class="bar-fill indet" id="setup-bar"></div></div>
+    <div class="setup-status" id="setup-status">连接中…</div>
+    <div class="setup-err" id="setup-err" hidden></div>
+  </div>
+</div>
 <div class="tabs">
   <button type="button" data-tab="groups" aria-pressed="true">群聊</button>
   <button type="button" data-tab="disc" aria-pressed="false">讨论</button>
@@ -100,24 +135,51 @@ export const SHELL_HTML = `<!doctype html>
     if (d.type === 'agent-chat-tab' && (d.tab === 'groups' || d.tab === 'disc')) apply(d.tab);
   });
   apply(tab === 'disc' ? 'disc' : 'groups');
-  /* 引擎初始化引导：轮询 /setup/status——下载中显示进度，失败显示原因，就绪后隐藏 */
+  /* 引擎初始化引导：轮询 /setup/status——引导层覆盖全页显示进度；引擎就绪后
+     退场，并把「引擎缺席期间打开」的内层页重载（否则停留在 fetch failed） */
   (function pollSetup(tries) {
     fetch(base + '/setup/status').then(function (r) { return r.json(); }).then(function (j) {
-      var el = document.getElementById('setup-hint');
-      if (!el) return;
-      if (j.live) { el.hidden = true; return; }
+      var overlay = document.getElementById('setup');
+      if (!overlay) return;
+      if (j.live) {
+        overlay.hidden = true;
+        if (pollSetup.sawDown) {
+          // 引擎是后起来的：内层页打开时 /wb 还不通，重载拿到真界面
+          frames[0].src = frames[0].src;
+          frames[1].src = frames[1].src;
+        }
+        return;
+      }
+      pollSetup.sawDown = true;
+      overlay.hidden = false;
+      var bar = document.getElementById('setup-bar');
+      var status = document.getElementById('setup-status');
+      var err = document.getElementById('setup-err');
       var d = j.download || {};
-      var msg = null;
+      err.hidden = true;
+      bar.classList.remove('indet');
       if (d.phase === 'downloading') {
         var pct = d.total ? Math.round((d.received / d.total) * 100) : 0;
-        msg = '正在初始化引擎：' + (d.file || '') + ' ' + pct + '%（首次约 1MB）';
+        bar.style.width = (d.total ? pct : 38) + '%';
+        if (!d.total) bar.classList.add('indet');
+        status.textContent = '正在下载引擎 ' + pct + '%（' +
+          (d.received / 1048576).toFixed(2) + ' / ' + (d.total ? (d.total / 1048576).toFixed(2) : '?') + ' MB）';
+      } else if (d.phase === 'verifying') {
+        bar.style.width = '100%';
+        status.textContent = '下载完成，正在校验完整性…';
+      } else if (d.phase === 'done') {
+        bar.style.width = '100%';
+        status.textContent = '引擎就绪，正在启动…';
       } else if (j.engine && j.engine.lastError) {
-        msg = '本地引擎未能自动启动：' + j.engine.lastError;
+        bar.classList.add('indet');
+        status.textContent = '引擎未能自动启动';
+        err.textContent = j.engine.lastError + '——可尝试安装桌面版（含引擎）后重开面板，或在已装 Super Agent CLI 的机器上先启动 workbench 再重开本面板。';
+        err.hidden = false;
+      } else {
+        bar.classList.add('indet');
+        status.textContent = '正在启动本地引擎…';
       }
-      if (msg) { el.textContent = msg; el.hidden = false; }
-      if (tries < 600 && !j.live && !(j.engine && j.engine.lastError)) {
-        setTimeout(function () { pollSetup(tries + 1); }, 800);
-      }
+      if (tries < 600) setTimeout(function () { pollSetup(tries + 1); }, 800);
     }).catch(function () {
       if (tries < 600) setTimeout(function () { pollSetup(tries + 1); }, 800);
     });
