@@ -37,13 +37,15 @@ export const SHELL_HTML = `<!doctype html>
   body {
     position: relative;
     display: flex; flex-direction: column;
-    background: transparent; color: #d6d9dd;
+    /* 不透明深色石墨：透明底会透出 DSH webview 的默认白（v0.2.13 实测），固定深色
+       与 DSH 深色界面、引导层一致；workbench 页自管主题（素纸时形成浏览器式分隔） */
+    background: #10151b; color: #d6d9dd;
     font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
   }
   .tabs {
     display: flex; gap: 6px; padding: 8px 10px; align-items: center;
-    border-bottom: 1px solid rgba(128, 128, 128, 0.28);
-    background: rgba(128, 128, 128, 0.08);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+    background: rgba(255, 255, 255, 0.03);
   }
   .ver-badge {
     margin-left: auto; font-size: 11px; color: rgba(214, 217, 221, 0.55);
@@ -59,7 +61,7 @@ export const SHELL_HTML = `<!doctype html>
     font-weight: 700; background: rgba(255, 255, 255, 0.13); color: #ffffff;
   }
   .frames { flex: 1; display: flex; min-height: 0; }
-  .frames iframe { flex: 1; width: 100%; border: none; display: none; background: transparent; }
+  .frames iframe { flex: 1; width: 100%; border: none; display: none; background: #10151b; }
   /* 引擎初始化引导层：自成一体深色（不依赖 workbench 令牌），覆盖全页（含 tab） */
   #setup {
     position: absolute; inset: 0; z-index: 9;
