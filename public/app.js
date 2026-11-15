@@ -1527,6 +1527,76 @@ bind("#pk-ok", () => {
   closePicker();
 });
 
+const installUiState = {};
+
+/* 参与者里选中了未安装应用时，给出精确版本一键安装 + 登录窗口（冷启动引导） */
+function syncInstallHint() {
+  const host = document.getElementById("nf-install-hint");
+  if (!host) return;
+  const missing = [...new Set(state.participantKinds)].filter((k) => {
+    const a = state.agentList.find((x) => x.kind === k);
+    return a && a.installed === false;
+  });
+  if (missing.length === 0) { host.hidden = true; host.innerHTML = ""; return; }
+  host.hidden = false;
+  host.innerHTML = missing
+    .map((k) => {
+      const a = state.agentList.find((x) => x.kind === k);
+      const st = installUiState[k] ?? {};
+      const status = st.running
+        ? "安装中…"
+        : st.code === 0
+          ? "安装完成 ✓"
+          : st.code != null && st.code !== 0
+            ? "失败（退出码 " + st.code + "）"
+            : "";
+      const loginBtn =
+        a.login && st.code === 0
+          ? ' <button type="button" class="ghost" data-login="' + esc(k) + '">打开登录窗口</button>'
+          : "";
+      return '<div><span class="muted small">' + esc(k) + " 未安装——将精确安装 " + esc(a.pkg) + "@" + esc(a.version) + "（需本机 Node.js/npm）。" + status + '</span> <button type="button" class="ghost" data-install="' + esc(k) + '"' + (st.running ? " disabled" : "") + ">一键安装</button>" + loginBtn + "</div>";
+    })
+    .join("");
+  for (const b of host.querySelectorAll("[data-install]")) {
+    b.addEventListener("click", async () => {
+      const k = b.dataset.install;
+      installUiState[k] = { running: true };
+      syncInstallHint();
+      try { await post(`/api/agents/${k}/install`); } catch (e) {
+        showBanner(`安装启动失败：${e.message}`);
+        installUiState[k] = { running: false };
+        syncInstallHint();
+        return;
+      }
+      const timer = setInterval(async () => {
+        try {
+          const st = await api(`/api/agents/${k}/install/status`);
+          installUiState[k] = { running: st.running, code: st.code };
+          if (!st.running) {
+            clearInterval(timer);
+            if (st.installed) showBanner(`${k} 安装完成。`, "ok");
+            try {
+              const d = await api("/api/agents");
+              state.agentList = Array.isArray(d.agents) ? d.agents : [];
+            } catch {}
+            renderParticipantRows();
+          } else {
+            syncInstallHint();
+          }
+        } catch { clearInterval(timer); }
+      }, 1200);
+    });
+  }
+  for (const b of host.querySelectorAll("[data-login]")) {
+    b.addEventListener("click", async () => {
+      try {
+        const r = await post(`/api/agents/${b.dataset.login}/login`);
+        showBanner(`已打开登录终端窗口。${r.note ?? ""}`);
+      } catch (e) { showBanner(`打开登录窗口失败：${e.message}`); }
+    });
+  }
+}
+
 function renderParticipantRows() {
   const el = $("#nf-participants");
   if (!el) return;
@@ -1548,7 +1618,7 @@ function renderParticipantRows() {
             ${list
               .map(
                 (a) =>
-                  `<option value="${esc(a.kind)}" ${a.kind === kind ? "selected" : ""}>${esc(a.label)}</option>`,
+                  `<option value="${esc(a.kind)}" ${a.kind === kind ? "selected" : ""} ${a.installed === false ? "disabled" : ""}>${esc(a.label)}${a.installed === false ? "（未安装）" : ""}</option>`,
               )
               .join("")}
           </select>
@@ -1558,6 +1628,7 @@ function renderParticipantRows() {
         </div>`;
     })
     .join("");
+  syncInstallHint();
   for (const sel of el.querySelectorAll('select[data-role="kind"]')) {
     sel.addEventListener("change", () => {
       const idx = Number(sel.dataset.index);

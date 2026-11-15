@@ -367,13 +367,20 @@ function renderRoster() {
   el.innerHTML = state.record.members
     .map((m) => {
       const inFlight = state.inFlight.includes(m.episodeId);
-      const status = m.leftAt
+      const status = m.needsAuth
+        ? `<span class="badge warn" title="该应用要求登录认证（ACP auth_required）">需要登录</span>`
+        : m.leftAt
         ? `<span class="badge ${m.needsReview ? "warn" : ""}"${m.needsReview ? ' title="在途回合取消未确认，待核对"' : ""}>${m.needsReview ? "已移出·待核对" : "已移出"}</span>`
         : inFlight
           ? `<span class="badge run">回合中…</span>`
           : `<span class="badge ok">在群</span>`;
       const kick = !m.leftAt && !state.record.closedAt
         ? `<button type="button" class="ghost" data-kick="${esc(m.episodeId)}" data-label="${esc(m.label)}">踢出</button>`
+        : "";
+      // ACP 认证门（terminal 型）：打开登录终端 + 完成后清除重试
+      const authBtns = m.needsAuth && !state.record.closedAt
+        ? `<button type="button" class="ghost" data-auth-launch="${esc(m.episodeId)}">打开登录向导</button>
+           <button type="button" class="ghost" data-auth-clear="${esc(m.episodeId)}">已登录，重试</button>`
         : "";
       // 归队：已移出的成员可原样复活（保留会话记忆）；needsReview 的归队走强制新会话
       const readd = m.leftAt && !state.record.closedAt
@@ -402,6 +409,7 @@ function renderRoster() {
           <div class="muted small">${esc(m.episodeId)} · ${esc(m.appId)}</div>
           ${tierRow}
         </div>
+        ${authBtns}
         ${kick}
         ${readd}
       </div>`;
@@ -426,6 +434,24 @@ function renderRoster() {
         showBanner(r.needsReview ? "已移出，但在途回合取消未获确认——标记待核对。" : "已移出群聊。", r.needsReview ? "warn" : "ok");
         await openGroup(state.record.id, { silent: true });
       } catch (err) { showBanner(`踢出失败：${err.message}`); }
+    });
+  }
+  for (const b of el.querySelectorAll("[data-auth-launch]")) {
+    b.addEventListener("click", async () => {
+      try {
+        const r = await post(`/api/groups/${state.record.id}/auth/${b.dataset.authLaunch}/launch`);
+        showBanner("已打开登录终端窗口——完成登录后关闭窗口，再点「已登录，重试」。", "ok");
+        if (r.note) console.info(r.note);
+      } catch (err) { showBanner(`打开登录向导失败：${err.message}`); }
+    });
+  }
+  for (const b of el.querySelectorAll("[data-auth-clear]")) {
+    b.addEventListener("click", async () => {
+      try {
+        await post(`/api/groups/${state.record.id}/auth/${b.dataset.authClear}/clear`);
+        showBanner("已清除认证标记——下回合自动重试。", "ok");
+        await openGroup(state.record.id, { silent: true });
+      } catch (err) { showBanner(`清除失败：${err.message}`); }
     });
   }
   for (const b of el.querySelectorAll("[data-readd]")) {
@@ -467,14 +493,85 @@ async function sendComposer() {
 async function loadAgentKinds() {
   try {
     const d = await api("/api/agents");
-    state.agents = [{ kind: "mock", label: "mock（模拟，零模型调用）" }].concat(
-      (d.agents ?? []).map((a) => ({ kind: a.kind, label: `${a.kind}（${a.version}）` })),
+    state.agents = [{ kind: "mock", label: "mock（模拟，零模型调用）", installed: true }].concat(
+      (d.agents ?? []).map((a) => ({
+        kind: a.kind,
+        label: `${a.kind}（${a.version}）`,
+        installed: !!a.installed,
+        login: !!a.login,
+        loginNote: a.loginNote ?? null,
+      })),
     );
   } catch {
-    state.agents = [{ kind: "mock", label: "mock（模拟，零模型调用）" }];
+    state.agents = [{ kind: "mock", label: "mock（模拟，零模型调用）", installed: true }];
   }
+  renderAgentSelect();
+}
+
+/* 应用下拉：已安装 / 未安装（置灰分组，选中后可一键安装） */
+function renderAgentSelect() {
   const sel = $("#am-app");
-  sel.innerHTML = state.agents.map((a) => `<option value="${esc(a.kind)}">${esc(a.label)}</option>`).join("");
+  if (!sel) return;
+  sel.onchange = () => renderAgentHint();
+  const installed = state.agents.filter((a) => a.installed);
+  const missing = state.agents.filter((a) => !a.installed);
+  sel.innerHTML =
+    installed.map((a) => `<option value="${esc(a.kind)}">${esc(a.label)}</option>`).join("") +
+    (missing.length
+      ? `<optgroup label="未安装（选中后可一键安装）">${missing
+          .map((a) => `<option value="${esc(a.kind)}">${esc(a.label)}（未安装）</option>`)
+          .join("")}</optgroup>`
+      : "");
+  if (!state.agents.some((a) => a.kind === sel.value && a.installed)) {
+    sel.value = installed[0]?.kind ?? "mock";
+  }
+  renderAgentHint();
+}
+
+function renderAgentHint() {
+  const hint = $("#am-agent-hint");
+  if (!hint) return;
+  const cur = state.agents.find((a) => a.kind === $("#am-app")?.value);
+  if (!cur) { hint.hidden = true; return; }
+  if (cur.installed) {
+    // 已安装：给出登录向导入口（不探测登录态——失败信号驱动）
+    hint.hidden = !cur.login;
+    if (cur.login) {
+      hint.innerHTML = `<span class="muted small">首次使用 ${esc(cur.kind)} 需登录（${esc(cur.loginNote ?? "")}）。</span> <button type="button" id="am-login" class="ghost">打开登录窗口</button>`;
+      document.getElementById("am-login")?.addEventListener("click", async () => {
+        try { await post(`/api/agents/${cur.kind}/login`); showBanner("已打开登录终端窗口——完成登录后关闭窗口并重试。", "ok"); }
+        catch (e) { showBanner(`打开登录窗口失败：${e.message}`); }
+      });
+    }
+    return;
+  }
+  hint.hidden = false;
+  hint.innerHTML = `<span class="muted small">${esc(cur.kind)} 未安装——将精确安装 ${esc(cur.pkg)}@${esc(cur.version)}（需本机 Node.js/npm）。</span> <button type="button" id="am-install" class="ghost">一键安装</button> <span id="am-install-out" class="muted small"></span>`;
+  document.getElementById("am-install")?.addEventListener("click", async () => {
+    const btn = document.getElementById("am-install");
+    if (btn) { btn.disabled = true; btn.textContent = "安装中…"; }
+    try { await post(`/api/agents/${cur.kind}/install`); } catch (e) {
+      showBanner(`安装启动失败：${e.message}`);
+      renderAgentHint();
+      return;
+    }
+    await pollAgentInstall(cur);
+  });
+}
+
+async function pollAgentInstall(cur) {
+  for (;;) {
+    let st;
+    try { st = await api(`/api/agents/${cur.kind}/install/status`); } catch { return; }
+    const out = document.getElementById("am-install-out");
+    if (out) out.textContent = st.running ? "下载安装中…" : st.code === 0 ? "安装完成 ✓" : st.code == null ? "…" : `失败（退出码 ${st.code}），详情见上`;
+    if (!st.running) break;
+    await new Promise((r) => setTimeout(r, 1200));
+  }
+  await loadAgentKinds();
+  const sel = document.getElementById("am-app");
+  if (sel && state.agents.some((a) => a.kind === cur.kind)) sel.value = cur.kind;
+  renderAgentHint();
 }
 
 async function addMember() {
