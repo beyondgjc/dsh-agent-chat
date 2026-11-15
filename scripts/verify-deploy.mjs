@@ -3,7 +3,7 @@
  * repo 内 rebuild 自动生效）。不一致 = 硬链接断了或没装，退出码 1。
  * 用法：npm run deploy（= typecheck + test + build + 本脚本）。
  */
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { execSync } from 'node:child_process'
@@ -19,7 +19,7 @@ const profileLib = join(
 )
 
 let ok = true
-for (const f of ['index.js', 'client.js']) {
+for (const f of ['index.js', 'client.js', 'engine.js']) {
   const src = readFileSync(join('lib', f))
   let dst = null
   try {
@@ -31,6 +31,10 @@ for (const f of ['index.js', 'client.js']) {
   console.log(`${f}: ${same ? 'profile 副本一致 ✓' : 'profile 副本不一致 ✗（进 profile 目录跑 pnpm install --prod）'}`)
   if (!same) ok = false
 }
+// public/ 静态资源（引擎捆绑形态下由插件提供）
+let pubOk = existsSync(join(profileLib, '..', 'public', 'app.js'))
+console.log(`public/: ${pubOk ? 'profile 存在 ✓' : 'profile 缺失 ✗（进 profile 目录跑 pnpm install --prod）'}`)
+if (!pubOk) ok = false
 
 try {
   const st = execSync('git status --porcelain', { encoding: 'utf8' }).trim()

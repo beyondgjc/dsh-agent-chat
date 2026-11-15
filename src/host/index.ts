@@ -11,6 +11,7 @@
  * 上游发现：env SUPER_WORKBENCH_UPSTREAM → <dataDir>/workbench.port → config.upstream → 7980 默认。
  */
 import { createSuperApi, type SuperApi } from './super-api.ts'
+import { ensureEngine, killEngine, engineStatus } from './engine.ts'
 import { registerSuperRoute } from './route.ts'
 import { syncAgentChatSkill } from './skill.ts'
 import { registerSuperDiscTools, registerSuperTools } from './tools.ts'
@@ -39,4 +40,21 @@ export function apply(ctx: any, config: Config = {}, homeDir?: string): void {
   registerSuperRoute(ctx, api)
   registerSuperTools(ctx, api)
   registerSuperDiscTools(ctx, api)
+
+  // 梯度 0：无存活实例时自动拉起捆绑引擎（一次性尝试 + 20s 就绪轮询；dispose 回收子进程）。
+  // 有桌面版/CLI 在跑时探测即命中，不会重复拉起。失败只降级（红横幅自愈照旧），不阻断插件。
+  ctx.effect(
+    () => {
+      void (async () => {
+        try {
+          const r = await ensureEngine(() => api.resolveBase())
+          if (!r.live) console.warn('[dsh-agent-chat] 引擎不可用：', engineStatus().lastError)
+        } catch (error) {
+          console.warn('[dsh-agent-chat] 引擎初始化异常（忽略）：', error)
+        }
+      })()
+      return () => killEngine()
+    },
+    'dsh-agent-chat: bundled engine',
+  )
 }

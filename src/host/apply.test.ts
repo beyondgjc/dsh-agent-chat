@@ -51,7 +51,7 @@ test('apply 冒烟：1 路由 + 5 工具（零生命周期）+ agentChatApi 服�
     EXPECTED_TOOLS,
   )
   assert.ok(ctx.provided['agentChatApi'], 'agentChatApi 服务已提供')
-  assert.equal(labels.length, 6)
+  assert.equal(labels.length, 7) // 1 路由 + 5 工具 + 1 捆绑引擎 effect
 })
 
 test('skill 同步：写入指定根、内容含 frontmatter、二次调用幂等', () => {

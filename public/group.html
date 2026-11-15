@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Super Agent 群聊室</title>
+  <link rel="stylesheet" href="/style.css" />
+  <script>
+    /* 主题初始化：与 index.html 同一机制（localStorage 记忆 > 系统深浅色 > 默认素纸） */
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem("wb-theme"); } catch (e) {}
+      if (t !== "paper" && t !== "signal") {
+        t = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "signal" : "paper";
+      }
+      document.documentElement.dataset.theme = t;
+    })();
+  </script>
+</head>
+<body class="group">
+  <header>
+    <button type="button" id="btn-aside" class="ghost layout-toggle icon-toggle" aria-expanded="true" title="折叠/展开群聊列表" aria-label="折叠/展开群聊列表">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+        <rect x="1.8" y="2.8" width="12.4" height="10.4" rx="2"/>
+        <path d="M6.2 2.8v10.4"/>
+      </svg>
+    </button>
+    <span class="brand-mark" aria-hidden="true">
+      <span class="brand-char">群</span>
+      <svg class="brand-orbit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+        <circle cx="12" cy="12" r="2.6" />
+        <circle cx="6" cy="7" r="1.6" />
+        <circle cx="18.4" cy="7.6" r="1.6" />
+        <circle cx="16.2" cy="17.4" r="1.6" />
+        <circle cx="6.8" cy="16.6" r="1.6" />
+      </svg>
+    </span>
+    <h1>Super Agent 群聊室</h1>
+    <span class="muted">仅本机回环 · 绑定文件夹 · 成员在群期间单一会话</span>
+    <a class="nav-link" href="/">← 讨论工作台</a>
+    <div class="theme-switch" role="group" aria-label="界面主题">
+      <button type="button" id="theme-paper" aria-pressed="true">素纸</button>
+      <button type="button" id="theme-signal" aria-pressed="false">信号台</button>
+    </div>
+  </header>
+  <div id="banner" class="banner" hidden style="margin: 8px 16px"></div>
+  <main>
+    <aside>
+      <button id="btn-new">＋ 新建群聊</button>
+      <div id="group-list"></div>
+      <div class="muted small" id="legend">
+        群 = 绑定文件夹的持久容器；成员可随时拉/踢；被踢后可召回（归队复用原会话）。
+        成员互 @ 自动接力：连击有上限，静默即收板。
+      </div>
+    </aside>
+    <section id="main">
+      <div id="empty" class="muted">
+        <svg class="empty-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+          <path d="M8 12.5C8 9.5 10.5 7 13.5 7h21C37.5 7 40 9.5 40 12.5v15c0 3-2.5 5.5-5.5 5.5H20l-8 8v-8.4C9.2 31.7 8 29.2 8 27.5z" />
+          <circle cx="17" cy="20" r="1.8" fill="currentColor" stroke="none" />
+          <circle cx="24" cy="20" r="1.8" fill="currentColor" stroke="none" />
+          <circle cx="31" cy="20" r="1.8" fill="currentColor" stroke="none" />
+        </svg>
+        <p>← 选择或新建一个群</p>
+        <p class="small">发一条需求：默认全体成员各回一合；@显示名 点名子集；成员回复里 @ 他人会自动接力（带连击上限与封板）。</p>
+      </div>
+      <div id="view" hidden>
+        <div id="head"></div>
+        <div class="group-layout">
+          <div class="group-main">
+            <div id="board" class="board" role="log" aria-label="群聊消息流"></div>
+            <div id="mention-chips" class="mention-chips"></div>
+            <div class="composer">
+              <textarea id="composer" aria-label="发布需求" placeholder="发布需求…（@显示名 可点名；Enter 发送，Shift+Enter 换行）"></textarea>
+              <button id="btn-send" class="primary">发送</button>
+            </div>
+          </div>
+          <div class="group-side">
+            <h3>成员 <span id="roster-count" class="muted small"></span></h3>
+            <div id="roster" class="roster"></div>
+            <details id="add-member">
+              <summary>拉人入群</summary>
+              <label>应用
+                <select id="am-app"></select>
+              </label>
+              <label>显示名（可空，默认自动）
+                <input id="am-label" type="text" placeholder="如：codex-2" />
+              </label>
+              <label>env 脚本（JSON，可空；mock 联调用）
+                <input id="am-env" type="text" placeholder='{"SUPER_MOCK_MENTIONS":"@甲"}' />
+              </label>
+              <button id="am-add" class="ghost">＋ 拉入群聊</button>
+            </details>
+            <button id="btn-del-group" class="ghost danger del-group" type="button">解散群组</button>
+          </div>
+        </div>
+      </div>
+      <div id="new-form" hidden>
+        <h2>新建群聊</h2>
+        <label>群名称
+          <input id="gf-name" type="text" placeholder="如：登录模块评审群" />
+        </label>
+        <label>工作目录（全体成员共享；类似新建讨论的 cwd）
+          <div class="cwd-row">
+            <input id="gf-cwd" type="text" readonly placeholder="选择一个文件夹" />
+            <button type="button" id="gf-pick">选择目录…</button>
+          </div>
+        </label>
+        <label>初始成员（可空，之后随时拉人）
+          <div id="gf-members"></div>
+          <div class="participant-actions">
+            <button type="button" id="gf-add-member" class="ghost">＋ 添加成员</button>
+            <span class="muted small">mock 为零模型调用的模拟成员，用于联调。</span>
+          </div>
+        </label>
+        <div id="gf-warn" class="banner" hidden></div>
+        <button id="gf-create" class="primary">创建并接入检查（免费，不调用模型）</button>
+        <button id="gf-cancel" class="ghost">取消</button>
+      </div>
+    </section>
+  </main>
+  <div id="pk-overlay" hidden>
+    <div id="pk-panel">
+      <h3>选择工作目录</h3>
+      <div id="pk-path" class="muted small">此电脑（选择盘符）</div>
+      <div id="pk-list"><p class="muted">加载中……</p></div>
+      <div class="pk-actions">
+        <button id="pk-up" class="ghost">← 上一级</button>
+        <span style="flex:1"></span>
+        <button id="pk-ok" class="primary">选择此目录</button>
+        <button id="pk-cancel" class="ghost">取消</button>
+      </div>
+    </div>
+  </div>
+  <script src="/group.js"></script>
+  <script>
+    /* 主题开关：与 index.html 同一机制，不触碰 group.js 的任何绑定 */
+    (function () {
+      var root = document.documentElement;
+      var btnPaper = document.getElementById("theme-paper");
+      var btnSignal = document.getElementById("theme-signal");
+      function apply(t) {
+        root.dataset.theme = t;
+        btnPaper.setAttribute("aria-pressed", String(t === "paper"));
+        btnSignal.setAttribute("aria-pressed", String(t === "signal"));
+      }
+      apply(root.dataset.theme === "signal" ? "signal" : "paper");
+      btnPaper.addEventListener("click", function () {
+        apply("paper");
+        try { localStorage.setItem("wb-theme", "paper"); } catch (e) {}
+      });
+      btnSignal.addEventListener("click", function () {
+        apply("signal");
+        try { localStorage.setItem("wb-theme", "signal"); } catch (e) {}
+      });
+    })();
+  </script>
+</body>
+</html>

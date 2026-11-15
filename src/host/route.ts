@@ -10,6 +10,7 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { SuperApi } from './super-api.ts'
+import { engineStatus } from './engine.ts'
 
 export const ROUTE_PREFIX = '/dsh-agent-chat-598'
 const API_PREFIX = `${ROUTE_PREFIX}/api`
@@ -57,9 +58,11 @@ export const SHELL_HTML = `<!doctype html>
   .tabs button[aria-pressed="true"] { font-weight: 700; background: var(--sel-soft); color: var(--sel); }
   .frames { flex: 1; display: flex; min-height: 0; }
   .frames iframe { flex: 1; width: 100%; border: none; display: none; background: var(--bg); }
+  .setup-hint { padding: 8px 12px; font-size: 12.5px; color: var(--bad); background: var(--bad-soft); }
 </style>
 </head>
 <body>
+<div id="setup-hint" class="setup-hint" hidden></div>
 <div class="tabs">
   <button type="button" data-tab="groups" aria-pressed="true">群聊</button>
   <button type="button" data-tab="disc" aria-pressed="false">讨论</button>
@@ -96,6 +99,15 @@ export const SHELL_HTML = `<!doctype html>
     if (d.type === 'agent-chat-tab' && (d.tab === 'groups' || d.tab === 'disc')) apply(d.tab);
   });
   apply(tab === 'disc' ? 'disc' : 'groups');
+  /* 引擎初始化失败时给出引导（成功/外部实例模式不显示） */
+  fetch(base + '/setup/status').then(function (r) { return r.json(); }).then(function (j) {
+    var err = j && j.engine && j.engine.lastError;
+    if (!err) return;
+    var el = document.getElementById('setup-hint');
+    if (!el) return;
+    el.textContent = '本地引擎未能自动启动：' + err;
+    el.hidden = false;
+  }).catch(function () {});
 })();
 </script>
 </body>
@@ -118,6 +130,11 @@ export function createSuperRouteHandler(api: SuperApi) {
     try {
       if (url === `${ROUTE_PREFIX}/health`) {
         send(200, { ok: true, upstream: await api.resolveBase() })
+        return
+      }
+      // /setup/status —— 引擎初始化状态（shell 引导横幅/调试用）
+      if (url === `${ROUTE_PREFIX}/setup/status`) {
+        send(200, { ok: true, upstream: await api.resolveBase(), engine: engineStatus() })
         return
       }
       // /shell —— 插件自持的 tab 容器页（客户端唯一 iframe 指向这里）

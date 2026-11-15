@@ -143,6 +143,17 @@ describe('super route handler（/wb 复用通道 + /api 反代）', () => {
     assert.ok('error' in JSON.parse(captured.body!))
   })
 
+  test('/setup/status → 引擎状态（bundled/childAlive/lastError）', async () => {
+    const { res, captured } = fakeRes()
+    await handler(fakeReq(`${ROUTE_PREFIX}/setup/status`), res)
+    assert.equal(captured.status, 200)
+    const j = JSON.parse(captured.body!)
+    assert.equal(j.ok, true)
+    assert.equal(j.upstream, upstreamBase)
+    assert.ok('bundled' in j.engine)
+    assert.ok('childAlive' in j.engine)
+  })
+
   test('/shell 容器页：HTML + 双内层 iframe + postMessage tab 通道 + 主题跟随', async () => {
     const { res, captured } = fakeRes()
     await handler(fakeReq(`${ROUTE_PREFIX}/shell`), res)

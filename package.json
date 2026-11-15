@@ -1,6 +1,6 @@
 {
   "name": "dsh-agent-chat",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "把 Super Agent 群聊（本机 workbench）接入 dsh：agent 工具 + 群聊板面侧栏",
   "type": "module",
   "main": "lib/index.js",
@@ -9,13 +9,17 @@
     "./client": "./lib/client.js"
   },
   "dsh": {
-    "bundle": { "patch": "./cordis.patch.yml" },
-    "client": { "platform": "web" }
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
   },
   "scripts": {
-    "build": "tsdown",
+    "build": "tsdown && node scripts/build-engine.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --test src/host/super-api.test.ts src/host/apply.test.ts src/host/route.test.ts",
+    "test": "node --test src/host/super-api.test.ts src/host/apply.test.ts src/host/route.test.ts src/host/engine.test.ts",
     "deploy": "npm run typecheck && npm test && npm run build && node scripts/verify-deploy.mjs"
   },
   "peerDependencies": {
@@ -26,6 +30,7 @@
   "devDependencies": {
     "@types/node": "^22.10.0",
     "@types/react": "^18.3.0",
+    "esbuild": "^0.28.2",
     "tsdown": "^0.12.9",
     "typescript": "^5.7.0"
   }

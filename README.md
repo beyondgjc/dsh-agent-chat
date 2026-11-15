@@ -41,8 +41,12 @@ dsh plugin --profile desktop add file:C:/Users/beyondguo/Documents/Agents/dsh-ag
    `- id: dsh-agent-chat` 的 `{ id, name, config: { upstream: "…" } }` 条目）
 4. 默认 `http://127.0.0.1:7980`
 
-注意：Super Agent **桌面版**默认动态端口 → 靠 portfile 自动发现；CLI `npm run workbench` 固定 7980。
-插件要能用，Super Agent 侧（桌面版或 CLI）必须有至少一个实例在跑。
+**一件安装（默认）**：插件包内捆绑了完整的本地引擎（lib/engine.js）——首次启动若检测不到
+存活实例，会自动用本机 Node 拉起引擎（动态端口 + portfile 握手），无需安装任何东西；
+DSH 关闭时引擎自动回收。引擎不可用（bundle 缺失/启动失败）时面板横幅给出原因。
+
+**已有 Super Agent 桌面版/CLI**：探测命中即直接复用，不会重复拉起（pid 校验互斥共存）。
+桌面版默认动态端口 → 靠 portfile 自动发现；CLI `npm run workbench` 固定 7980。
 
 ## 开发
 
