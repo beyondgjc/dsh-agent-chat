@@ -31,7 +31,8 @@ docs/            M2–M6 里程碑报告、GROUP-M1 群聊报告、依赖冻结�
 ### 1.2 dsh-agent-chat（单包）
 
 ```
-src/host/        路由（/shell 容器 + /wb 复用代理 + /api 反代）、5 个 agent 工具、
+src/host/        路由（/shell 容器 + /wb 复用代理 + /api 反代+同源防线）、模型工具面
+                 （5 个 super_* 工具 + skill 同步，默认关——config.tools 开启）、
                  skill 同步、引擎拉起 ensureEngine、首启下载、native-pick 代弹
 src/client/      侧栏单一 iframe + 停靠保活
 scripts/         build-engine.mjs / pack-engine-artifact.mjs / publish-engine.mjs / verify-deploy.mjs
@@ -126,16 +127,19 @@ npm run deploy   # typecheck + test + build（tsdown + esbuild 引擎 bundle）+
 
 1. 访问 `/dsh-agent-chat-598/setup/status` → live / engine / download 状态正常，版本徽标 = 当前版本
 2. 创建群（codex-acp + codebuddy）：~30s 接入成功、不弹控制台黑窗（超时已放宽 90s）
-3. 「选择目录…」弹出原生对话框（DSH Electron 主进程代弹）
+3. 「选择目录…」弹出原生对话框（client 顶层主帧桥直调 DSH preload 的
+   `__DSH_DIRECTORY_PICKER__` → Electron 主进程 dialog；iframe 直调会被主进程的
+   mainFrame 硬门拒绝）
 4. 面板切走再切回：选中/滚动/草稿保留（停靠保活）
 
 ## 4. 发布
 
 ### 4.1 版本号
 
-唯一真源是插件仓 `package.json` 的 `version`（当前 0.2.20）：tsdown 以 `__PLUGIN_VERSION__`
-注入 host，运行时决定缓存子目录（`~/.dsh/cache/dsh-agent-chat/<version>/`）与 Release tag
-（`v<version>`）。**引擎/编排有实质变更才 bump**；纯插件壳小改不必 bump（捆绑副本随 lib 走）。
+唯一真源是插件仓 `package.json` 的 `version`（当前 0.2.26，npm 包同名同步）：tsdown 以
+`__PLUGIN_VERSION__` 注入 host，运行时决定缓存子目录（`~/.dsh/cache/dsh-agent-chat/<version>/`）、
+Release tag（`v<version>`）与 npm 引擎下载 URL（Releases/download/v<version>/）。
+**引擎/编排有实质变更才 bump**；纯插件壳小改不必 bump（捆绑副本随 lib 走）。
 
 ### 4.2 引擎 artifact 发布（对外，PyLance 式）
 
@@ -147,13 +151,35 @@ npm run publish-engine   # gh release create/upload v<version>；已存在则 --
 
 - 发布的是**产物**（引擎 bundle + mock + public），源码仍私有
 - GitHub Releases 新资产有几分钟 404 传播延迟：publish 后 curl 校验 manifest 返回 200 再宣称完成
+- **npm 版本与 artifact 必须成对**：npm 用户装的版本会按 `v<version>` 下载引擎——bump 后
+  忘了 publish-engine = npm 用户首启下载 404
 
-### 4.3 插件发布（对外）
+### 4.3 插件发布到 npm（CI 通道）
 
-- 当前形态：源码公开（GitHub）+ 引擎产物走 Releases；插件本体安装走 DSH 插件安装流程 /
-  开发机 `npm run deploy`
-- 正式 npm 发布已预留：排除 `lib/engine.js` + `lib/mock-agent.mjs`（`--no-engine` 即发布形态
-  验证），首启下载层自动成为主路径
+包 = 插件壳（`.npmignore` 排除 `lib/engine.js` / `lib/mock-agent.mjs` / `lib/engine-manifest.json` /
+`public/`——引擎不上 npm，下载层为主路径；`repository` 字段指回本仓库，市场自动关联）。
+**发布走 GitHub Actions**（`.github/workflows/publish.yml`，workflow_dispatch + 版本一致性门禁 +
+断言无引擎）：
+
+```sh
+# 一次性：npmjs.com 生成 granular token（读写本包）→ gh secret set NPM_TOKEN --repo beyondgjc/dsh-agent-chat
+gh workflow run publish.yml -f confirm=<package.json 版本>   # 如 0.2.27
+```
+
+坑（0.2.24~26 三连实录）：
+
+- 本机 `npm publish` 会**假成功**：stage 成功、finalize 被本机透明代理吞掉（npm 照常打印
+  `+ <pkg>@<version>`），但包从未落库（unpkg/jsdelivr 404）。**发布一律走 CI**
+- 本机默认 registry 是 npmmirror（镜像不能发也不能官方登录）：任何 npm 命令查/发官方源
+  必须显式 `--registry https://registry.npmjs.org`
+- 核验**别信本机 GET**（代理缓存污染，cache-bust 也可能被无视）：用 unpkg / jsdelivr /
+  npmmirror 等第三方视角，或 CI 日志
+- **全新包名**的 registry 索引/CDN 传播有分钟级延迟：publish 成功后别急着下结论（0.2.24
+  曾被误判为"被吞"，一小时后实为全部落库）
+- 同版本重发撞上已 staged 的残留 → 409 "Cannot publish over previously staged version"：
+  bump 新版本绕过；`0.0.0-stage` 占位哨兵是 staged 残留（无害，用带 2FA 的浏览器会话可删）
+- peer 范围按 awesome 列表的 node-semver 元组警告补显式预发布分支（`^4.0.4 || >=4.0.5-alpha.0
+  <4.0.6-0 || …`），否则会静默排除 harness 预发布构建
 
 ### 4.4 桌面版发布（产品侧，私有/内部分发）
 
@@ -172,8 +198,10 @@ npm run desktop:dist     # electron-builder --win → apps/desktop/release/
 1. 两仓库 working tree 干净；插件 `main` 与 origin 同步
 2. 引擎/编排有变更 → bump `package.json` version → `npm run build`（同步引擎 bundle 与 public/）→ `npm run pack:artifact`
 3. `npm run deploy` 本机全绿 → 重启 DSH 实测（§3.4 清单）
-4. `npm run publish-engine` → 等传播延迟 → curl 校验 manifest
-5. `git push`（CI 绿即收工）
+4. `npm run publish-engine` → 等传播延迟 → curl 校验 manifest（npm 版本与 artifact 必须成对）
+5. `git push`；npm 发布走 `gh workflow run publish.yml -f confirm=<版本>`（需 NPM_TOKEN secret）→
+   unpkg/jsdelivr 视角核验落库
+6. CI 绿 + npm latest 指向新版本即收工
 
 ## 5. 故障排查
 
@@ -184,7 +212,8 @@ npm run desktop:dist     # electron-builder --win → apps/desktop/release/
 | 面板白屏/连接失败 | 看 `/setup/status`；校验 portfile（JSON，pid 存活才采信）；引擎死亡时面板自动退避重连 1s→15s |
 | 升级后仍是旧行为 | 旧引擎实例存活钉死 → portfile 带版本，版本守卫应自动换新；仍钉死则手动结束旧引擎进程再重启 DSH |
 | 拉人报"适配器未安装" | `npm run agents:install`（产品仓），或确认 `%LOCALAPPDATA%\SuperAgent\apps` 下有对应 kind |
-| 首启下载 404 | 刚发布的传播延迟（等几分钟）；或 `package.json` version 与 Release tag 不齐 |
+| 首启下载 404 | 刚发布的传播延迟（等几分钟）；或 npm 版本与 Release tag 不齐（npm 版本与 artifact 必须成对发布） |
+| npm publish 假成功（unpkg 404） | 本机透明代理吞 finalize——发布一律走 CI（§4.3）；本机 GET 验证不可信 |
 | 引擎拉起弹黑窗 | 引擎必须用 DSH runtimes 的控制台子系统 node（windowsHide）；检查 `dshNodeExe()` 是否命中 |
 | 引擎进程归属 | 引擎随 DSH 生命周期回收，独立子进程（崩溃不连坐）；与桌面版/CLI 经 portfile pid 互斥共存 |
 
