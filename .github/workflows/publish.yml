@@ -1,0 +1,41 @@
+# npm 发布（CI 出口）：本机网络的 finalize 会被透明代理吞掉（2026-11-17 三连实录：
+# stage 成功 → 伪造 finalize 响应 → npm 误报成功，unpkg/jsdelivr 404）——发布走
+# GitHub Actions。前置（用户一次性）：npmjs.com 生成 granular token（读写
+# dsh-agent-chat）→ 仓库 Settings → Secrets → Actions → NPM_TOKEN。
+# 触发：gh workflow run publish.yml -f confirm=<package.json 版本>
+name: npm publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: '输入 package.json 的版本号以确认（如 0.2.27）'
+        required: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - run: npm run typecheck && npm test && npm run build
+      # npm 形态 = 插件壳：引擎不上 npm，下载层（Releases artifact）是主路径——
+      # 捆绑引擎若出现在 CI 产物里即为打包事故
+      - name: 断言不含引擎
+        run: |
+          test ! -f lib/engine.js
+          test ! -f lib/mock-agent.mjs
+          test ! -f lib/engine-manifest.json
+      - name: 版本一致性
+        run: |
+          PKG=$(node -p "require('./package.json').version")
+          if [ "$PKG" != "${{ github.event.inputs.confirm }}" ]; then
+            echo "版本不一致：package.json=$PKG，输入=${{ github.event.inputs.confirm }}"; exit 1
+          fi
+      - run: npm publish --registry https://registry.npmjs.org
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
