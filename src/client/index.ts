@@ -17,6 +17,20 @@
   const loader = (window as any).__ModuleLoader__
   if (!loader) return
 
+  /* 原生目录对话框二传手：DSH 的 preload 桥 __DSH_DIRECTORY_PICKER__ 只注入顶层主帧，
+     主进程也只接受 mainFrame 发起的 invoke（apps/desktop/src/directory-picker.ts 硬门，
+     subframes cannot open dialogs），内层 workbench 页（iframe）够不着。宿主半侧又
+     跑在 ELECTRON_RUN_AS_NODE 子进程里（process.type 永非 'browser'），HTTP 代弹
+     （/api/fs/native-pick）在 DSH 形态必回 null。本 client 恰好跑在顶层主帧——
+     代为调用并挂到 window，内页同源直调。约定：无桥（非桌面形态）reject → 页面走
+     HTTP 兜底；resolve null = 用户取消（页面不回退网页选择器）。 */
+  ;(window as any).__AGENT_CHAT_PICK__ = (startDir?: string): Promise<string | null> => {
+    void startDir // 主进程 directoryPick IPC 不收起始目录（DSH 未开放参数），形参仅对齐页面签名
+    const bridge = (window as any).__DSH_DIRECTORY_PICKER__
+    if (!bridge?.pick) return Promise.reject(new Error('no-bridge'))
+    return bridge.pick()
+  }
+
   function makeFactory(): (require: (id: string) => any) => any {
     return function (require: (id: string) => any) {
       const React = require('react')

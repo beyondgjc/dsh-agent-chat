@@ -1049,6 +1049,23 @@ function showNewForm({ keepParticipants = false } = {}) {
 
 /** 目录选择：优先弹 Windows 原生对话框（系统自带组件）；失败回退网页目录选择器 */
 async function pickNative() {
+  // DSH 形态：插件 client 在顶层主帧挂了 __AGENT_CHAT_PICK__（preload 桥只注入顶层
+  // 主帧，主进程只接受 mainFrame 发起）——同源直调代弹。无桥（桌面版/独立浏览器）
+  // reject → 走原 HTTP 路径；resolve null = 用户取消，不回退网页选择器。
+  try {
+    const top = window.top;
+    if (top && top !== window && typeof top.__AGENT_CHAT_PICK__ === "function") {
+      const p = await top.__AGENT_CHAT_PICK__(state.newFormCwd || undefined);
+      if (p) {
+        state.newFormCwd = p;
+        setCwdDisplay();
+        showBanner(`已选择目录：${p}`);
+      } else {
+        showBanner("未选择目录（已取消）。");
+      }
+      return;
+    }
+  } catch { /* 无桥/桥异常 → 原路径 */ }
   showBanner("已弹出系统目录选择窗口——请在屏幕上的窗口中选择，确定后这里会自动填入路径。");
   try {
     const d = await api("/api/fs/native-pick", { method: "POST", timeoutMs: 600_000 });

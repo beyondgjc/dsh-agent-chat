@@ -742,6 +742,17 @@ function showNewForm() {
 }
 
 async function pickDirectory() {
+  // DSH 形态：插件 client 在顶层主帧挂了 __AGENT_CHAT_PICK__（preload 桥只注入顶层
+  // 主帧，主进程只接受 mainFrame 发起）——同源直调代弹。无桥（桌面版/独立浏览器）
+  // reject → 走原 HTTP 路径；resolve null = 用户取消，不回退网页选择器。
+  try {
+    const top = window.top;
+    if (top && top !== window && typeof top.__AGENT_CHAT_PICK__ === "function") {
+      const p = await top.__AGENT_CHAT_PICK__(state.newForm.cwd || undefined);
+      if (p) { state.newForm.cwd = p; $("#gf-cwd").value = p; }
+      return;
+    }
+  } catch { /* 无桥/桥异常 → 原路径 */ }
   try {
     const d = await api("/api/fs/native-pick", { method: "POST", timeoutMs: 600_000 });
     if (d.path) { state.newForm.cwd = d.path; $("#gf-cwd").value = d.path; return; }
