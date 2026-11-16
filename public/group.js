@@ -394,10 +394,16 @@ function renderRoster() {
       let tierRow = "";
       if (!m.leftAt && m.appId !== "mock") {
         const enforceable = !!cfgEntry?.readonlyEnforceable;
-        const roLabel = enforceable ? "只读" : "只读（软约束）";
+        const discovered = !!cfgEntry && !!cfgEntry.config;
+        // 只在真实发现过才宣称软/硬：引擎换代后发现缓存清零、尚未重接时不下结论
+        const roLabel = discovered && !enforceable ? "只读（软约束）" : "只读";
         const sel = (kind, opts) =>
           `<select class="tier" data-ep="${esc(m.episodeId)}" data-kind="${kind}" style="font-size:11.5px;width:100%;min-width:0">${opts}</select>`;
         const rows = [];
+        if (!discovered) {
+          // 后台重接已由 /configs 触发（connecting 去重）；冷适配器数十秒内自动补齐
+          rows.push(`<p class="muted" style="font-size:11px;margin:0 0 2px">档位发现中——适配器接入后自动出现模型/思考档</p>`);
+        }
         if (cfg && cfg.modelConfigId) {
           rows.push(
             `<div style="display:flex;gap:4px;margin-top:4px">`
