@@ -1594,7 +1594,7 @@ function syncInstallHint() {
             if (st.installed) showBanner(`${k} 安装完成。`, "ok");
             try {
               const d = await api("/api/agents");
-              state.agentList = Array.isArray(d.agents) ? d.agents : [];
+              state.agentList = sortAgents(d.agents);
             } catch {}
             renderParticipantRows();
           } else {
@@ -1699,10 +1699,18 @@ function syncParticipantHints() {
   if (infoEl) infoEl.hidden = false;
 }
 
+/* 目录序 = registry 原生数组序（不稳定）：已安装优先、同段按 kind 字母序。
+ * 平铺下拉里未安装项沉底置灰；slice(0,2)/find 兜底也因此落到已装项而非未装项 */
+function sortAgents(list) {
+  return (Array.isArray(list) ? list : []).sort(
+    (a, b) => (b.installed ? 1 : 0) - (a.installed ? 1 : 0) || a.kind.localeCompare(b.kind),
+  );
+}
+
 async function loadAgentOptions() {
   try {
     const d = await api("/api/agents");
-    state.agentList = Array.isArray(d.agents) ? d.agents : [];
+    state.agentList = sortAgents(d.agents);
     state.defaultPair = Array.isArray(d.defaultPair) ? d.defaultPair : [];
     resetParticipantKinds();
     renderParticipantRows();

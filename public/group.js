@@ -386,42 +386,59 @@ function renderRoster() {
       const readd = m.leftAt && !state.record.closedAt
         ? `<button type="button" class="ghost" data-readd="${esc(m.episodeId)}" data-label="${esc(m.label)}" data-fresh="${m.needsReview ? "1" : ""}">${m.needsReview ? "归队（新会话）" : "归队"}</button>`
         : "";
-      // 档位行：非 mock、且本机发现过会话档位的成员可随时改模型/思考强度（下一回合生效）
+      // 档位行：非 mock 成员可改读写模式（全员开放——发现 readOnly 模式走协议级硬护栏，
+      // 未发现仅提示词软约束，选项诚实标注）；发现过模型档位的再加模型/思考强度下拉。
+      // 下一回合生效，不中断会话。两行布局：模型|思考 一行，模式独行（窄栏挤不下三列）。
       const cfgEntry = (state.memberConfigs || []).find((x) => x.episodeId === m.episodeId);
       const cfg = cfgEntry && cfgEntry.config;
       let tierRow = "";
-      if (!m.leftAt && m.appId !== "mock" && cfg && cfg.modelConfigId) {
-        const mOpts = [`<option value="">应用默认</option>`].concat(
-          (cfg.modelOptions || []).map((o) => `<option value="${esc(o.value)}" ${m.config?.model === o.value ? "selected" : ""}>${esc(o.name)}</option>`)
-        ).join("");
-        const rOpts = [`<option value="">应用默认</option>`].concat(
-          (cfg.reasoningOptions || []).map((o) => `<option value="${esc(o.value)}" ${m.config?.reasoning === o.value ? "selected" : ""}>${esc(o.name)}</option>`)
-        ).join("");
-        tierRow = `<div style="display:flex;gap:4px;margin-top:4px">
-          <select class="tier" data-ep="${esc(m.episodeId)}" data-kind="model" style="font-size:11.5px;flex:1;min-width:0">${mOpts}</select>
-          <select class="tier" data-ep="${esc(m.episodeId)}" data-kind="reasoning" style="font-size:11.5px;flex:1;min-width:0">${rOpts}</select>
-        </div>`;
+      if (!m.leftAt && m.appId !== "mock") {
+        const enforceable = !!cfgEntry?.readonlyEnforceable;
+        const roLabel = enforceable ? "只读" : "只读（软约束）";
+        const sel = (kind, opts) =>
+          `<select class="tier" data-ep="${esc(m.episodeId)}" data-kind="${kind}" style="font-size:11.5px;width:100%;min-width:0">${opts}</select>`;
+        const rows = [];
+        if (cfg && cfg.modelConfigId) {
+          rows.push(
+            `<div style="display:flex;gap:4px;margin-top:4px">`
+            + `<div style="flex:1;min-width:0">${sel("model", [`<option value="">应用默认</option>`].concat(
+              (cfg.modelOptions || []).map((o) => `<option value="${esc(o.value)}" ${m.config?.model === o.value ? "selected" : ""}>${esc(o.name)}</option>`)
+            ).join(""))}</div>`
+            + `<div style="flex:1;min-width:0">${sel("reasoning", [`<option value="">应用默认</option>`].concat(
+              (cfg.reasoningOptions || []).map((o) => `<option value="${esc(o.value)}" ${m.config?.reasoning === o.value ? "selected" : ""}>${esc(o.name)}</option>`)
+            ).join(""))}</div>`
+            + `</div>`,
+          );
+        }
+        rows.push(
+          `<div style="margin-top:4px">${sel("mode", `<option value="" ${m.config?.mode !== "readonly" ? "selected" : ""}>读写（默认）</option>`
+            + `<option value="readonly" ${m.config?.mode === "readonly" ? "selected" : ""}>${roLabel}</option>`)}</div>`,
+        );
+        tierRow = rows.join("");
       }
+      // 布局（用户定案 2026-11-17）：踢出/归队/登录按钮收进名字行右端（mr-actions），
+      // 档位行铺满整行宽——按钮不再整列占右侧、下拉不再被挤窄
       return `<div class="member-row${m.leftAt ? " left" : ""}" style="--mh:${hueOf(m.label)}">
         <span class="avatar sm" aria-hidden="true">${firstChar(m.label)}</span>
         <div class="grow">
-          <div class="mr-top"><strong>${esc(m.label)}</strong>${status}</div>
+          <div class="mr-top"><strong>${esc(m.label)}</strong>${status}<span class="mr-actions">${authBtns}${kick}${readd}</span></div>
           <div class="muted small">${esc(m.episodeId)} · ${esc(m.appId)}</div>
           ${tierRow}
         </div>
-        ${authBtns}
-        ${kick}
-        ${readd}
       </div>`;
     })
     .join("");
   for (const sel of el.querySelectorAll("select.tier")) {
     sel.addEventListener("change", async () => {
       const ep = sel.dataset.ep;
-      const model = el.querySelector(`select.tier[data-ep="${ep}"][data-kind="model"]`)?.value ?? "";
-      const reasoning = el.querySelector(`select.tier[data-ep="${ep}"][data-kind="reasoning"]`)?.value ?? "";
+      const val = (kind) => el.querySelector(`select.tier[data-ep="${ep}"][data-kind="${kind}"]`)?.value ?? "";
       try {
-        await post(`/api/groups/${state.record.id}/member-config`, { episodeId: ep, model: model || undefined, reasoning: reasoning || undefined });
+        await post(`/api/groups/${state.record.id}/member-config`, {
+          episodeId: ep,
+          model: val("model") || undefined,
+          reasoning: val("reasoning") || undefined,
+          mode: val("mode") || undefined,
+        });
         showBanner("档位已更新——下一回合提交前应用。", "ok");
       } catch (err) { showBanner(`档位设置失败：${err.message}`); }
     });
@@ -493,8 +510,10 @@ async function sendComposer() {
 async function loadAgentKinds() {
   try {
     const d = await api("/api/agents");
-    state.agents = [{ kind: "mock", label: "mock（模拟，零模型调用）", installed: true }].concat(
-      (d.agents ?? []).map((a) => ({
+    // 目录序 = registry CDN 原生数组序（不稳定，内置尾巴吊底）：mock 保持置顶默认，
+    // 其余按 kind 字母序——已安装/未安装两个 optgroup 各自有序、codebuddy 归位
+    const kinds = (d.agents ?? [])
+      .map((a) => ({
         kind: a.kind,
         label: `${a.kind}（${a.version}）`,
         pkg: a.pkg ?? "",
@@ -502,8 +521,9 @@ async function loadAgentKinds() {
         installed: !!a.installed,
         login: !!a.login,
         loginNote: a.loginNote ?? null,
-      })),
-    );
+      }))
+      .sort((a, b) => a.kind.localeCompare(b.kind));
+    state.agents = [{ kind: "mock", label: "mock（模拟，零模型调用）", installed: true }].concat(kinds);
   } catch {
     state.agents = [{ kind: "mock", label: "mock（模拟，零模型调用）", installed: true }];
   }
@@ -603,6 +623,7 @@ async function addMember() {
     showBanner(`已拉入：${r.member.label}（${r.member.episodeId}）`, "ok");
     $("#am-label").value = "";
     $("#am-env").value = "";
+    $("#add-member")?.removeAttribute("open"); // 拉人成功 → 收起表单（结果横幅 + 成员栏可见）
     await openGroup(state.currentId, { silent: true });
   } catch (err) { showBanner(`拉人失败：${err.message}`); }
 }
@@ -854,8 +875,11 @@ async function main() {
     } catch (err) { showBanner(`删除失败：${err.message}`); }
   });
   initLayoutToggles();
-  await loadAgentKinds();
-  await refreshList();
+  // 列表先行：首屏不被 /api/agents 挡住（该接口首调含 registry CDN 拉取，CN 网络动辄数秒）；
+  // agents 目录只喂新建群/拉人下拉与安装提示，并行加载即可（内部自带 mock 兜底）
+  const listP = refreshList();
+  loadAgentKinds().catch(() => {});
+  await listP;
   // 支持 /groups?id=... 直达；否则恢复上次查看的群（已删则不恢复）
   const wanted = new URLSearchParams(location.search).get("id");
   if (wanted && state.groups.some((g) => g.id === wanted)) await openGroup(wanted);

@@ -537,7 +537,7 @@ body.group #view { display: flex; flex-direction: column; flex: 1; min-height: 0
 .group-layout { display: flex; gap: 20px; flex: 1; min-height: 0; margin-top: 10px; }
 .group-main { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .group-side {
-  width: 300px; flex: 0 0 auto;
+  width: 340px; flex: 0 0 auto;
   display: flex; flex-direction: column; gap: 8px;
   overflow-y: auto;
   border-left: 1px solid var(--line);
@@ -547,10 +547,11 @@ body.group #view { display: flex; flex-direction: column; flex: 1; min-height: 0
 .group-side h3 .small { font-weight: 400; }
 .group-side label { margin: 8px 0 0; }
 
-/* 窄窗口（DSH 面板）：成员栏仍在右侧展开（用户定案：不换行到板面下方），仅收窄列宽 */
+/* 窄窗口（DSH 面板）：成员栏仍在右侧展开（用户定案：不换行到板面下方），仅收窄列宽；
+   档位下拉三件套后 240px 截字严重 → 280px（用户 2026-11-17：再宽一点） */
 @media (max-width: 1020px) {
   .group-side {
-    width: 240px; border-left: 1px solid var(--line);
+    width: 280px; border-left: 1px solid var(--line);
     padding-left: 12px; padding-top: 0;
   }
 }
@@ -709,6 +710,9 @@ body.disc.aside-folded aside { display: none; }
   transition: border-color 0.12s;
 }
 .member-row:hover { border-color: var(--line-strong); }
+/* 踢出/归队/登录按钮收进名字行右端（mr-actions）：不整列占右侧，档位行铺满整行宽 */
+.member-row .mr-actions { margin-left: auto; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.member-row .mr-actions button { margin: 0; }
 .member-row .grow { flex: 1; min-width: 0; }
 .member-row .mr-top { display: flex; align-items: center; gap: 7px; min-width: 0; flex-wrap: wrap; }
 .member-row .mr-top strong { font-size: 13px; }
