@@ -8,7 +8,7 @@
  * 本插件在 apply() 时把 SKILL.md 幂等同步到用户根 ~/.dsh/skills/agent-chat/：
  * 内容没变就不写；卸载插件不回收（skill 留着无害，避免误删用户目录里的东西）。
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -81,4 +81,16 @@ export function syncAgentChatSkill(homeDir: string = homedir()): SkillSyncResult
   mkdirSync(dir, { recursive: true })
   writeFileSync(file, SKILL_MD, 'utf8')
   return { path: file, changed: true }
+}
+
+/** 工具面关闭时回收已同步的 skill 目录——stale 内容会把模型指向不存在的工具。尽力而为不抛错。 */
+export function removeAgentChatSkill(homeDir: string = homedir()): boolean {
+  const dir = join(homeDir, '.dsh', 'skills', SKILL_DIRNAME)
+  try {
+    if (!existsSync(dir)) return false
+    rmSync(dir, { recursive: true, force: true })
+    return true
+  } catch {
+    return false
+  }
 }

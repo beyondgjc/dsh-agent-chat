@@ -1632,12 +1632,21 @@ function renderParticipantRows() {
         <div class="participant-row" data-index="${i}">
           <span class="participant-index">参与者 ${i + 1}${i === 0 ? "（默认综合者）" : ""}</span>
           <select data-role="kind" data-index="${i}">
-            ${list
-              .map(
-                (a) =>
-                  `<option value="${esc(a.kind)}" ${a.kind === kind ? "selected" : ""} ${a.installed === false ? "disabled" : ""}>${esc(a.label)}${a.installed === false ? "（未安装）" : ""}</option>`,
-              )
-              .join("")}
+            ${(() => {
+              // 对齐群聊表单：已安装平铺在前，未安装入独立分组、**可选**——选中后
+              // nf-install-hint 出精确版本一键安装 + 登录窗口（此前 disabled 导致
+              // 安装引导永远不可达，评审外用户实测反馈 2026-11-17）
+              const installed = list.filter((a) => a.installed);
+              const missing = list.filter((a) => !a.installed);
+              const opt = (a) =>
+                `<option value="${esc(a.kind)}" ${a.kind === kind ? "selected" : ""}>${esc(a.label)}${a.installed === false ? "（未安装）" : ""}</option>`;
+              return (
+                installed.map(opt).join("") +
+                (missing.length
+                  ? `<optgroup label="未安装（选中后可一键安装）">${missing.map(opt).join("")}</optgroup>`
+                  : "")
+              );
+            })()}
           </select>
           <input type="text" class="role-input" data-role="preset" data-index="${i}"
             placeholder="角色设定（可选）" value="${esc(role)}" maxlength="2000" />

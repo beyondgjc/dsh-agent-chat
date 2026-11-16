@@ -37,22 +37,35 @@ const EXPECTED_TOOLS = new Set([
   'super_disc_detail',
 ])
 
-test('apply 冒烟：1 路由 + 5 工具（零生命周期）+ agentChatApi 服务', () => {
+test('apply 默认不注入工具面：0 工具 + 旧 skill 回收（用户定案：先满足 UI 使用）', () => {
   const { ctx, tools, routes, labels } = makeStubCtx()
   const tmpHome = mkdtempSync(join(tmpdir(), 'dsh-agent-chat-test-'))
+  syncAgentChatSkill(tmpHome) // 预置历史同步的 skill → 默认 apply 应回收
   // engineAuto:false——冒烟测试不拉真引擎
   apply(ctx, { upstream: 'http://127.0.0.1:59999', engineAuto: false }, tmpHome)
 
   assert.equal(routes.length, 1)
   assert.equal(routes[0].kind, 'prefix')
   assert.equal(routes[0].path, '/dsh-agent-chat-598')
-  assert.equal(tools.length, 5)
-  assert.deepEqual(
-    new Set(tools.map((t) => t.name)),
-    EXPECTED_TOOLS,
-  )
+  assert.equal(tools.length, 0, '默认不注册任何 agent 工具')
+  assert.equal(labels.length, 1) // 仅路由 effect（工具面关 + engineAuto:false）
   assert.ok(ctx.provided['agentChatApi'], 'agentChatApi 服务已提供')
-  assert.equal(labels.length, 6) // 1 路由 + 5 工具（engineAuto:false 不注册引擎 effect）
+  assert.ok(
+    !existsSync(join(tmpHome, '.dsh', 'skills', 'agent-chat', 'SKILL.md')),
+    '旧 skill 已回收（stale 内容会把模型指向不存在的工具）',
+  )
+})
+
+test('apply tools:true：5 工具（零生命周期）+ skill 同步', () => {
+  const { ctx, tools, routes, labels } = makeStubCtx()
+  const tmpHome = mkdtempSync(join(tmpdir(), 'dsh-agent-chat-test-'))
+  apply(ctx, { upstream: 'http://127.0.0.1:59999', engineAuto: false, tools: true }, tmpHome)
+
+  assert.equal(routes.length, 1)
+  assert.equal(tools.length, 5)
+  assert.deepEqual(new Set(tools.map((t) => t.name)), EXPECTED_TOOLS)
+  assert.equal(labels.length, 6) // 1 路由 + 5 工具
+  assert.ok(existsSync(join(tmpHome, '.dsh', 'skills', 'agent-chat', 'SKILL.md')))
 })
 
 test('skill 同步：写入指定根、内容含 frontmatter、二次调用幂等', () => {
