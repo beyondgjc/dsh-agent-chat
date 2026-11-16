@@ -7,7 +7,7 @@
  * CI（公开仓库）没有私有仓库 → 自动跳过，只跑 tsdown。
  */
 import { build } from 'esbuild'
-import { cpSync, existsSync, mkdirSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -56,3 +56,9 @@ await build({
 })
 
 console.log('[engine] lib/engine.js + lib/mock-agent.mjs + public/ 已产出')
+
+// 引擎版本标记：engine-entry 读相邻 engine-manifest.json 自报版本（读不到 → 'dev'
+// → 面板徽标「版本不匹配 · 引擎 vdev」+ 版本守卫失去基准）。下载形态的缓存目录
+// 自带 manifest，捆绑形态（lib/）此前缺失——补上，verify-deploy 按硬链接同步进 profile。
+const version = JSON.parse(readFileSync(join(pkg, 'package.json'), 'utf8')).version
+writeFileSync(join(pkg, 'lib', 'engine-manifest.json'), JSON.stringify({ version }, null, 2) + '\n')
