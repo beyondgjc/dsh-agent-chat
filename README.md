@@ -4,6 +4,8 @@
 薄插件：不嵌引擎源码、不改 Super Agent 架构；宿主半侧是本机 workbench 的
 代理 + agent 工具 + skill，UI 经 `/wb` 通道整体复用。
 
+> 开发者向的仓库结构 / 本地部署 / 发布流程 / 故障排查见 [DEVELOPMENT.md](DEVELOPMENT.md)。
+
 ## 功能
 
 - **5 个 agent 工具**（零生命周期；dsh 会话里模型直接调用）：
