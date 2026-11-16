@@ -172,14 +172,26 @@ function spawnEngineAt(engineFile: string, publicDir: string): EngineSpawnResult
 }
 
 export function killEngine(): void {
-  if (child) {
-    try {
-      child.kill()
-    } catch {
-      /* 已退出 */
+  if (!child) return
+  const pid = child.pid
+  try {
+    if (process.platform === 'win32' && pid) {
+      // child.kill() 在 Windows 是 TerminateProcess：引擎进程内的善后（server.close →
+      // 杀 agent 树、删 portfile）不会运行，agent 孙进程成孤儿。taskkill /T 连树一并清
+      // （与 agentConnection.ts 的连接关闭同款）；残留 portfile 由下次启动的 pid 存活
+      // 校验兜底（探活失败 → 换新实例）。
+      spawn('taskkill', ['/PID', String(pid), '/T', '/F'], {
+        stdio: 'ignore',
+        windowsHide: true,
+        detached: true,
+      }).unref()
+    } else {
+      child.kill() // POSIX：SIGTERM → 引擎 main 的优雅关闭（关 runner、清 portfile）
     }
-    child = null
+  } catch {
+    /* 已退出 */
   }
+  child = null
 }
 
 /** 捆绑形态拉起（lib/engine.js + 包内 public/）——保留为 dev/本地 deploy 形态 */
