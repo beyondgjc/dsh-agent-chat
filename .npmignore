@@ -1,0 +1,13 @@
+# npm 包 = 插件壳（host/client/patch 清单）：引擎服务不上 npm，走 Releases 首启下载
+src/
+scripts/
+dist/
+assets/
+.github/
+tsconfig.json
+tsdown.config.mjs
+lib/engine.js
+lib/mock-agent.mjs
+lib/engine-manifest.json
+public/
+*.log
