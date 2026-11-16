@@ -5,7 +5,9 @@
  *   /dsh-agent-chat-598/wb/*          → workbench UI 整体复用通道：HTML 注入 fetch shim
  *                                       （页面里的 /api/... 请求改写到本代理）+ 根相对资源改写；
  *                                       非 HTML 字节透传。query 全程透传（/groups?id= 深链可用）
- *   /dsh-agent-chat-598/api/*         → 反向代理到 workbench /api/…（客户端半侧同源访问，无 CORS）
+ *   /dsh-agent-chat-598/api/*         → 反向代理到 workbench /api/…（客户端半侧同源访问，无 CORS；
+ *                                       入口做同源校验——代理转发不带 Origin，不挡会把跨源
+ *                                       drive-by POST 洗白过上游的 Host/Origin 防线）
  * handler 抽为 createSuperRouteHandler，route.test.ts 对 7 条路径做自动化覆盖。
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -261,6 +263,27 @@ export const SHELL_HTML = `<!doctype html>
 </body>
 </html>`
 
+/**
+ * /api 同源防线（AC-26 在代理侧的等价物）：上游 workbench 自带 Host/Origin 校验，
+ * 但本代理转发用服务端 fetch——不带 Origin，等于替跨源请求洗白（drive-by POST 可弹
+ * 原生对话框/发消息/建群）。证据式判定：带 Origin 必须与 Host 同源；无 Origin 但
+ * Sec-Fetch-Site 标记跨站（cross-site/same-site）也拒；两者皆无（服务端内部调用、
+ * curl 等非浏览器客户端）放行。仅 /api 有状态变更；/wb、/setup 只读，不设卡。
+ */
+function isSameOrigin(req: IncomingMessage): boolean {
+  const headers = req.headers ?? {}
+  const origin = headers.origin
+  if (typeof origin === 'string' && origin !== '') {
+    try {
+      return new URL(origin).host === headers.host
+    } catch {
+      return false // Origin 不可解析（含 sandbox 的 "null"）→ 一律视为跨源
+    }
+  }
+  const site = headers['sec-fetch-site']
+  return site !== 'cross-site' && site !== 'same-site'
+}
+
 export function createSuperRouteHandler(api: SuperApi) {
   return async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const rawUrl = req.url ?? '/'
@@ -351,6 +374,10 @@ export function createSuperRouteHandler(api: SuperApi) {
         return
       }
       if (url === API_PREFIX || url.startsWith(`${API_PREFIX}/`)) {
+        if (!isSameOrigin(req)) {
+          send(403, { error: 'cross-origin request rejected' })
+          return
+        }
         // 原生目录选择：捆绑引擎（无 GUI）弹不了系统对话框 → 由插件宿主代弹
         // （DSH Electron 主进程的 dialog）。非 DSH 形态返回 path:null，页面回退网页选择器。
         if (req.method === 'POST' && url === `${API_PREFIX}/fs/native-pick`) {

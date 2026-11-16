@@ -65,11 +65,12 @@ describe('super route handler（/wb 复用通道 + /api 反代）', () => {
     return { res, captured }
   }
 
-  function fakeReq(url: string, method = 'GET', body?: string): any {
+  function fakeReq(url: string, method = 'GET', body?: string, headers: Record<string, string> = {}): any {
     const chunks = body ? [Buffer.from(body)] : []
     return {
       url,
       method,
+      headers,
       async *[Symbol.asyncIterator]() {
         for (const c of chunks) yield c
       },
@@ -126,6 +127,42 @@ describe('super route handler（/wb 复用通道 + /api 反代）', () => {
     assert.equal(seen.at(-1)!.method, 'POST')
     assert.equal(seen.at(-1)!.path, '/api/groups/g1/messages')
     assert.equal(seen.at(-1)!.body, '{"text":"hi"}')
+  })
+
+  test('/api 同源防线：跨源 Origin → 403 不转发（AC-26 代理侧防线）', async () => {
+    const { res, captured } = fakeRes()
+    await handler(
+      fakeReq(`${ROUTE_PREFIX}/api/groups/co-test`, 'POST', '{"text":"evil"}', {
+        origin: 'http://evil.example.com',
+        host: '127.0.0.1:598',
+      }),
+      res,
+    )
+    assert.equal(captured.status, 403)
+    assert.equal(seen.filter((s) => s.path === '/api/groups/co-test').length, 0)
+  })
+
+  test('/api 同源防线：无 Origin 但 Sec-Fetch-Site 跨站 → 403', async () => {
+    const { res, captured } = fakeRes()
+    await handler(
+      fakeReq(`${ROUTE_PREFIX}/api/groups/co-test2`, 'POST', '{}', { 'sec-fetch-site': 'cross-site' }),
+      res,
+    )
+    assert.equal(captured.status, 403)
+    assert.equal(seen.filter((s) => s.path === '/api/groups/co-test2').length, 0)
+  })
+
+  test('/api 同源 POST（Origin 与 Host 一致）正常透传', async () => {
+    const { res, captured } = fakeRes()
+    await handler(
+      fakeReq(`${ROUTE_PREFIX}/api/groups`, 'POST', '{"text":"ok"}', {
+        origin: 'http://127.0.0.1:598',
+        host: '127.0.0.1:598',
+      }),
+      res,
+    )
+    assert.equal(captured.status, 200)
+    assert.equal(JSON.parse(captured.body!).ok, true)
   })
 
   test('上游不可达 → 502 JSON（不炸宿主）', async () => {
