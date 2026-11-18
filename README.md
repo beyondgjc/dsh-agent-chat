@@ -84,8 +84,8 @@ Super Agent（私有仓库 super-agent-zcode）
 
 | | |
 |---|---|
-| ![群聊室](assets/group-chat.png) | ![新建群聊](assets/group-create.png) |
-| ![讨论执行](assets/discussion-detail.png) | ![新建讨论](assets/discussion-create.png) |
+| ![](screenshots/screenshot-1.png) | ![](screenshots/screenshot-2.png) |
+| ![](screenshots/screenshot-4.png) | ![](screenshots/screenshot-3.png) |
 
 ## 开发
 
